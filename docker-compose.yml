@@ -1,0 +1,22 @@
+# Local development database only. Not intended for production.
+# Usage: POSTGRES_PASSWORD=<choose-one> docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ravi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ravi_ai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - ravi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ravi -d ravi_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ravi_pgdata:

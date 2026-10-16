@@ -1,0 +1,25 @@
+{
+  "name": "@ravi/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "build": "tsup",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@ravi/ai-engine": "workspace:*",
+    "@ravi/core": "workspace:*",
+    "@ravi/db": "workspace:*",
+    "@ravi/validation": "workspace:*",
+    "@ravi/whatsapp": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15"
+  }
+}
