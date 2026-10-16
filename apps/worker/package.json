@@ -8,7 +8,8 @@
     "build": "tsup",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "tsup": "^8.5.1",
-    "tsx": "^4.23.15"
+    "tsx": "^4.23.15",
+    "@ravi/testing": "workspace:*"
   }
 }

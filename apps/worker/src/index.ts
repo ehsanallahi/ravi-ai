@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createProvider } from "@ravi/ai-engine";
 import { createLogger, errorMessage, parseEncryptionKey } from "@ravi/core";
-import { prisma } from "@ravi/db";
+import { checkDatabaseHealth, prisma } from "@ravi/db";
 import { parseEnv, workerEnvSchema } from "@ravi/validation";
 import { handlers } from "./handlers";
 import type { WorkerContext } from "./jobs";
@@ -16,6 +16,9 @@ async function main() {
   const env = parseEnv(workerEnvSchema);
   const workerId = env.WORKER_ID ?? `${hostname()}-${process.pid}`;
   const log = createLogger({ service: "worker", workerId });
+
+  const health = await checkDatabaseHealth(prisma);
+  if (!health.ok) throw new Error("Database is not reachable; check DATABASE_URL");
 
   const ctx: WorkerContext = {
     prisma,

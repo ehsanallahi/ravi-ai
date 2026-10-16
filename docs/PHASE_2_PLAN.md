@@ -207,3 +207,34 @@ Unit tests remain for pure logic. Integration tests become a required CI job.
 | A missed `organizationId` filter in a new query              | Lint rule, the data layer as the only path, and IDOR integration tests on every new entity |
 | Tests run against the wrong database                         | Host and name safety guard before any setup or truncation                                  |
 | Proxy-only protection bypass (CVE-2025-29927 class)          | The proxy is never the security boundary; `requireTenant` runs in every handler            |
+
+---
+
+## Implementation status (2026-10-17)
+
+Implemented on `feat/phase-2-auth-tenancy` with the approved decisions: Better Auth 1.7.10, closed
+registration, Resend in production with a local outbox, TOTP required for owners and admins,
+manual WhatsApp replies deferred, AI replies and live sending disabled.
+
+| Milestone                  | Status | Evidence                                                                                                                                                                                |
+| -------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1 PostgreSQL              | Done   | `pnpm db:local` (PostgreSQL 18, dev + test databases), additive migration applied to local dev, no drift, `/api/health/ready`, worker startup check, test-database guard (8 unit tests) |
+| M2 Authentication          | Done   | Login and logout, database sessions, verification, password reset, rate limits, secure cookies, CSRF, TOTP and backup codes, owner CLI; 12 integration tests + end-to-end smoke test    |
+| M3 Organization management | Done   | Members, role changes, removal and leaving, invitations, org switcher, audit log, last-owner protection (including concurrency); 16 integration tests                                   |
+| M4 Tenant isolation        | Done   | `resolveTenant` + tenant data layer + ESLint import ban; 17 integration tests including manipulated IDs                                                                                 |
+| M5 Dashboard               | Done   | `/o/[orgSlug]`: overview (live counts), conversations, contacts, leads, team, settings, WhatsApp status; no fabricated statistics                                                       |
+| M6 Testing                 | Done   | 73 unit + 52 integration tests; 29-step end-to-end smoke test; Phase 1 tests preserved                                                                                                  |
+
+Deviations from the plan:
+
+- **Registration modes:** only `closed` exists. Invitation acceptance is admin-initiated, so a
+  separate `invite` mode was unnecessary. Any public mode needs a new decision.
+- **Password hashing:** Better Auth's default scrypt (not argon2id), to avoid a native dependency.
+  It can be swapped through `emailAndPassword.password` later.
+- **Found and fixed during testing:** (1) Better Auth disables origin and CSRF checks when it
+  detects a test environment, so they are now pinned on explicitly; (2) the Phase 1 root `.env`
+  loading in `next.config.ts` never took effect (`@next/env` caching); (3) the Phase 1 README was
+  corrupted by an encoding mix-up and has been rewritten.
+
+Needs real credentials: Resend delivery, Meta webhook and live messages. AI replies and outbound
+sending stay off by design.

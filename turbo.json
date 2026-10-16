@@ -22,6 +22,11 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "test:integration": {
+      "dependsOn": ["^db:generate"],
+      "cache": false,
+      "passThroughEnv": ["TEST_DATABASE_URL"]
     }
   }
 }

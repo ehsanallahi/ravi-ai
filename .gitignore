@@ -32,3 +32,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# local PostgreSQL data, credentials and email outbox (dev only)
+.data/

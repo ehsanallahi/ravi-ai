@@ -158,3 +158,34 @@ the worker. `/api/health` is a liveness check. Metrics and tracing (OpenTelemetr
   horizontally.
 - PostgreSQL 15+ (managed recommended).
 - Migrations: `pnpm db:migrate:deploy` as a release step.
+
+## 10. Authentication and tenancy (Phase 2)
+
+```
+browser ── /api/auth/* ──► Better Auth (email/password, sessions, verification, TOTP, rate limits)
+        ── /o/[slug]/* ──► proxy.ts (cookie present? else /login; optimistic only)
+                           └► page / Server Action
+                                └► requireTenant / tenantAction (apps/web/src/server/tenancy)
+                                     └► resolveTenant(session.user, slug, permission)
+                                          → TenantContext { userId, organizationId, role }
+                                └► server/data/* and server/services/* (always take TenantContext)
+```
+
+- **Better Auth handles authentication only.** Organizations, memberships and RBAC are Ravi AI's
+  own tables and code (`@ravi/core` `can()`), so authorization never depends on a plugin.
+- **`resolveTenant` is the only source of a `TenantContext`** (it is a branded type). It checks, in
+  order: a session exists, the email is verified, the user is a member of the slug's organization
+  (otherwise `not_found`), TOTP is enabled for OWNER and ADMIN, and the permission. Pages map those
+  outcomes to a login redirect, a 2FA setup redirect, a 404 or an access-denied message.
+- **Data layer rules:** every read filters by `ctx.organizationId`; every write is
+  `updateMany({ where: { id, organizationId } })` and must affect exactly one row; referenced IDs
+  (contact for a lead, assignee for a conversation) are checked against the same organization.
+  Writes re-check permissions and write an audit entry in the same transaction.
+- **Enforcement:** an ESLint `no-restricted-imports` rule bans importing `prisma` from
+  `src/app`, `src/components` and `src/lib` (API routes excepted). Integration tests attempt
+  cross-tenant reads and writes with manipulated IDs.
+- **Account creation** happens only in `createCredentialUser`, called from the owner CLI
+  (`pnpm --filter @ravi/web owner:create`) and from invitation acceptance. Public sign-up is
+  disabled.
+- **Email** goes through an `EmailSender` interface: `ResendEmailSender` (production),
+  `OutboxEmailSender` (local `.data/outbox`), `MemoryEmailSender` (tests).

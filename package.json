@@ -14,11 +14,13 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build",
     "db:generate": "pnpm --filter @ravi/db db:generate",
     "db:migrate:dev": "pnpm --filter @ravi/db db:migrate:dev",
     "db:migrate:deploy": "pnpm --filter @ravi/db db:migrate:deploy",
-    "db:studio": "pnpm --filter @ravi/db db:studio"
+    "db:studio": "pnpm --filter @ravi/db db:studio",
+    "test:integration": "turbo run test:integration --concurrency=1",
+    "db:local": "pnpm --filter @ravi/testing db:local"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
