@@ -1,5 +1,7 @@
 # Ravi AI
 
+[![CI](https://github.com/ehsanallahi/ravi-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ehsanallahi/ravi-ai/actions/workflows/ci.yml)
+
 WhatsApp AI customer support and sales automation, built on the **official Meta WhatsApp Cloud
 API**. Owned by Ravi Stack. This is a standalone product, independent of the Ravi Stack agency
 website.
@@ -13,6 +15,7 @@ website.
 - Product: [docs/PRD.md](docs/PRD.md)
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Database: [docs/DATABASE.md](docs/DATABASE.md)
+- Security review: [docs/SECURITY.md](docs/SECURITY.md)
 - Roadmap: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) ·
   Phase 2: [docs/PHASE_2_PLAN.md](docs/PHASE_2_PLAN.md)
 
@@ -162,15 +165,17 @@ database that is not on localhost or whose name does not end in `_test`.
 
 Results from this repository, Phase 2:
 
-| Check                                                   | Result                                                                            |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `pnpm lint`                                             | ✅ no findings (including the Prisma-import ban, verified with a probe file)      |
-| `pnpm typecheck`                                        | ✅ all 9 packages                                                                 |
-| `pnpm test` (unit)                                      | ✅ 73 tests                                                                       |
-| `pnpm test:integration` (real PostgreSQL 18)            | ✅ 52 tests: auth 12, tenancy 17, organizations 16, worker 7                      |
-| `pnpm build`                                            | ✅ all authenticated routes render dynamically                                    |
-| `prisma validate`, migration drift, `migrate status`    | ✅ valid, no drift, up to date on local `ravi_ai_dev`                             |
-| End-to-end smoke test (dev server, local test database) | ✅ 29/29: owner CLI, verification, sign-in, required 2FA, backup code, 404s, CSRF |
+| Check                                                        | Result                                                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `pnpm lint`                                                  | ✅ no findings (including the Prisma-import ban, verified with a probe file)               |
+| `pnpm typecheck`                                             | ✅ all 9 packages                                                                          |
+| `pnpm test` (unit)                                           | ✅ 87 tests                                                                                |
+| `pnpm test:integration` (real PostgreSQL 18)                 | ✅ 56 tests: auth 16, tenancy 17, organizations 16, worker 7                               |
+| `pnpm build`                                                 | ✅ all authenticated routes render dynamically                                             |
+| `prisma validate`, migration drift, `migrate status`         | ✅ valid, no drift, up to date on local `ravi_ai_dev`                                      |
+| End-to-end smoke test (dev server, local test database)      | ✅ 29/29: owner CLI, verification, sign-in, required 2FA, backup code, 404s, CSRF          |
+| Secret scan (gitleaks, full history) and `pnpm audit --prod` | ✅ no leaks; no known production vulnerabilities (dev-only advisories in docs/SECURITY.md) |
+| GitHub Actions CI                                            | See the badge and the PR checks                                                            |
 
 Waiting for real credentials (not verified):
 

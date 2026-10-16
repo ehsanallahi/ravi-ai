@@ -1,0 +1,133 @@
+# Continuous integration for Ravi AI.
+#
+# - Uses only synthetic test data and a throwaway PostgreSQL service container.
+# - No repository secrets are used (only the automatic, read-only GITHUB_TOKEN).
+# - Nothing is deployed; no WhatsApp, Resend or AI API is called.
+# - Third-party actions are pinned to full commit SHAs (the tag is noted for updates).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  TURBO_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
+
+jobs:
+  verify:
+    name: Lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # CI-only credentials for a disposable container; not a secret and never reused.
+          POSTGRES_USER: ravi_ci
+          POSTGRES_PASSWORD: ci-only-throwaway-password
+          POSTGRES_DB: ravi_ai_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ravi_ci -d ravi_ai_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Integration tests refuse any database that isn't local and named *_test.
+      TEST_DATABASE_URL: postgresql://ravi_ci:ci-only-throwaway-password@localhost:5432/ravi_ai_test
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm (version from package.json "packageManager")
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        working-directory: packages/db
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+
+      - name: Check migrations contain no destructive statements
+        run: |
+          if grep -nE '^\s*(DROP|TRUNCATE|DELETE FROM|ALTER TABLE [^;]* (DROP|RENAME)|ALTER COLUMN [^;]* TYPE)' packages/db/prisma/migrations/*/migration.sql; then
+            echo "::error::Destructive statement found in a migration. This needs explicit owner approval."
+            exit 1
+          fi
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Formatting
+        run: pnpm format:check
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests (PostgreSQL)
+        run: pnpm test:integration
+
+      - name: Production build
+        run: pnpm build
+
+  security:
+    name: Dependency and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out (full history for secret scanning)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          # Read-only token, used only to annotate findings. No license is needed for
+          # repositories owned by a personal account.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Audit production dependencies (fails on high or critical)
+        run: pnpm audit --prod --audit-level=high
+
+      - name: Audit all dependencies (report only)
+        run: pnpm audit || echo "::warning::Advisories in development dependencies; see docs/SECURITY.md"
