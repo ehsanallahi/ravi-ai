@@ -9,7 +9,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Feature branches too, so every pushed commit gets a result even before a PR exists.
+    branches: [main, "feat/**"]
   workflow_dispatch:
 
 permissions:
