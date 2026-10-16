@@ -13,6 +13,7 @@ export const TEST_AUTH_ENV: AuthEnv = {
   BETTER_AUTH_URL: BASE_URL,
   REGISTRATION_MODE: "closed",
   EMAIL_PROVIDER: "outbox",
+  AUTH_IP_HEADERS: ["x-forwarded-for"],
 };
 
 export function createTestAuth() {

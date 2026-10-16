@@ -229,3 +229,77 @@ describe("TOTP two-factor authentication", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("production hardening", () => {
+  it("caps sign-in attempts per account even when the attacker rotates IPs", async () => {
+    await createVerifiedUser("owner@example.test", PASSWORD);
+    const statuses: number[] = [];
+    // A fresh client (new IP) per attempt, so the per-IP limit never triggers.
+    for (let i = 0; i < 12; i++) {
+      statuses.push(
+        (await new AuthClient(auth).signIn("owner@example.test", "guess-guess-guess")).status,
+      );
+    }
+    expect(statuses.slice(0, 10).every((s) => s === 401)).toBe(true);
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    // The limit is per account: other accounts are unaffected.
+    await createVerifiedUser("other@example.test", PASSWORD);
+    expect((await new AuthClient(auth).signIn("other@example.test", PASSWORD)).status).toBe(200);
+    // Email case and whitespace don't create separate buckets.
+    expect((await new AuthClient(auth).signIn(" OWNER@example.test ", PASSWORD)).status).toBe(429);
+  });
+
+  it("caps password-reset emails per account across IPs", async () => {
+    await createVerifiedUser("owner@example.test", PASSWORD);
+    const statuses: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      statuses.push(
+        (
+          await new AuthClient(auth).request("/request-password-reset", {
+            body: { email: "owner@example.test", redirectTo: "/reset-password" },
+          })
+        ).status,
+      );
+    }
+    expect(statuses.slice(0, 5).every((s) => s === 200)).toBe(true);
+    expect(statuses.slice(5)).toEqual([429, 429]);
+    expect(email.sent.filter((m) => m.kind === "reset-password")).toHaveLength(5);
+  });
+
+  it("refuses 'trust this device', so required 2FA can't be skipped for 30 days", async () => {
+    await createVerifiedUser("owner@example.test", PASSWORD);
+    const setup = new AuthClient(auth);
+    await setup.signIn("owner@example.test", PASSWORD);
+    const enable = await setup.request("/two-factor/enable", { body: { password: PASSWORD } });
+    const totp = totpFromUri(enable.json?.totpURI as string);
+    await setup.request("/two-factor/verify-totp", { body: { code: totp.generate() } });
+
+    const client = new AuthClient(auth);
+    await client.signIn("owner@example.test", PASSWORD);
+    const trusted = await client.request("/two-factor/verify-totp", {
+      body: { code: totp.generate(), trustDevice: true },
+    });
+    expect(trusted.status).toBe(400);
+    expect(client.rawSetCookies.some((c) => /trust/i.test(c))).toBe(false);
+    expect(await client.session()).toBeNull();
+  });
+
+  it("disables auth endpoints the app does not use", async () => {
+    await createVerifiedUser("owner@example.test", PASSWORD);
+    const client = new AuthClient(auth);
+    await client.signIn("owner@example.test", PASSWORD);
+    for (const path of [
+      "/delete-user",
+      "/change-email",
+      "/update-user",
+      "/sign-in/social",
+      "/list-accounts",
+    ]) {
+      const res = await client.request(path, {
+        body: { newEmail: "x@example.test", provider: "google" },
+      });
+      expect(res.status, path).toBe(404);
+    }
+    expect(await prisma.user.count()).toBe(1);
+  });
+});

@@ -76,6 +76,7 @@ export async function createOrganizationWithOwner(
 }
 
 export async function getOrganizationSettings(ctx: TenantContext) {
+  assertPermission(ctx, "settings:manage");
   return prisma.organization.findUniqueOrThrow({
     where: { id: ctx.organizationId },
     select: {

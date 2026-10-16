@@ -8,3 +8,9 @@ onlyBuiltDependencies:
   - esbuild
   - prisma
   - sharp
+
+# Security overrides (keep the reason next to each entry; remove once upstream updates).
+overrides:
+  # GHSA for deepmerge-ts <8 (stack exhaustion). Pulled in by the Prisma CLI's config loader
+  # (also via better-auth's optional prisma peer). Prisma only calls deepmerge(), unchanged in v8.
+  deepmerge-ts: ^8.0.2

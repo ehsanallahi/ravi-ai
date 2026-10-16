@@ -18,6 +18,12 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  // Baseline CSP: blocks framing, plugins, <base> hijacking and off-site form posts. Script
+  // sources are not restricted yet (Next.js inline scripts would need nonces; planned).
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+  },
 ];
 
 const nextConfig: NextConfig = {

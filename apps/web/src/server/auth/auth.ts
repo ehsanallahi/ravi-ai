@@ -10,8 +10,9 @@ import {
   resetPasswordMessage,
   verifyEmailMessage,
 } from "../email/templates";
-
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./constants";
+import { createHardeningHook, DISABLED_AUTH_PATHS } from "./hardening";
+
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 export interface AuthDeps {
@@ -32,6 +33,10 @@ export function createAuth({ env, email, prisma = defaultPrisma, nextJsCookies =
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     database: prismaAdapter(prisma, { provider: "postgresql" }),
+    // Endpoints the app does not use are switched off entirely.
+    disabledPaths: DISABLED_AUTH_PATHS,
+    // Per-account throttles and "no trusted devices" (see hardening.ts).
+    hooks: { before: createHardeningHook(prisma) },
     // CSRF: state-changing requests must come from this origin.
     trustedOrigins: [env.BETTER_AUTH_URL],
 
@@ -92,6 +97,9 @@ export function createAuth({ env, email, prisma = defaultPrisma, nextJsCookies =
       disableOriginCheck: false,
       disableCSRFCheck: false,
       cookiePrefix: "ravi",
+      // Client IP for rate limits comes ONLY from this header. The production proxy (load
+      // balancer, CDN) must overwrite it; otherwise clients could spoof it to evade IP limits.
+      ipAddress: { ipAddressHeaders: env.AUTH_IP_HEADERS },
       useSecureCookies: env.NODE_ENV === "production",
       defaultCookieAttributes: { httpOnly: true, sameSite: "lax" },
     },

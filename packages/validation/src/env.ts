@@ -35,6 +35,20 @@ export const authEnvSchema = z
      * explicit product decision.
      */
     REGISTRATION_MODE: z.literal("closed").default("closed"),
+    /**
+     * Header(s) carrying the real client IP, used for rate limiting. Your proxy MUST overwrite
+     * it (for example, Cloudflare: "cf-connecting-ip"). Comma-separated.
+     */
+    AUTH_IP_HEADERS: z
+      .string()
+      .default("x-forwarded-for")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((h) => h.trim().toLowerCase())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.string().regex(/^[a-z0-9-]+$/, "Invalid header name")).min(1)),
     EMAIL_PROVIDER: z.enum(["resend", "outbox"]).default("outbox"),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
