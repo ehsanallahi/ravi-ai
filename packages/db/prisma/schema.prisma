@@ -1,0 +1,341 @@
+// Ravi AI — PostgreSQL schema. See docs/DATABASE.md.
+// Never run destructive migrations (drops / resets) against shared or production data.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum WhatsAppAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageSenderType {
+  CONTACT
+  AI
+  AGENT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  STICKER
+  LOCATION
+  CONTACTS
+  INTERACTIVE
+  BUTTON
+  REACTION
+  TEMPLATE
+  UNSUPPORTED
+}
+
+enum MessageStatus {
+  RECEIVED
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  WON
+  LOST
+}
+
+enum KnowledgeSourceType {
+  MANUAL
+  FILE
+  URL
+}
+
+enum KnowledgeDocumentStatus {
+  DRAFT
+  PROCESSING
+  READY
+  FAILED
+  ARCHIVED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  DEAD
+}
+
+model Organization {
+  id                 String   @id @default(cuid())
+  name               String
+  slug               String   @unique
+  timezone           String   @default("UTC")
+  aiAutoReplyEnabled Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  memberships        Membership[]
+  whatsappAccounts   WhatsAppAccount[]
+  contacts           Contact[]
+  conversations      Conversation[]
+  messages           Message[]
+  leads              Lead[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks    KnowledgeChunk[]
+  auditLogs          AuditLog[]
+}
+
+model User {
+  id              String    @id @default(cuid())
+  /// Stored lower-cased.
+  email           String    @unique
+  name            String?
+  /// Reserved for the Phase 2 authentication decision; never store plaintext.
+  passwordHash    String?
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships           Membership[]
+  assignedConversations Conversation[]      @relation("ConversationAssignee")
+  sentMessages          Message[]           @relation("MessageSentBy")
+  ownedLeads            Lead[]              @relation("LeadOwner")
+  createdDocuments      KnowledgeDocument[] @relation("DocumentCreatedBy")
+  auditLogs             AuditLog[]
+}
+
+model Membership {
+  id             String         @id @default(cuid())
+  organizationId String
+  userId         String
+  role           MembershipRole @default(AGENT)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model WhatsAppAccount {
+  id                    String                @id @default(cuid())
+  organizationId        String
+  /// Cloud API phone number ID; webhooks are routed to a tenant by this value.
+  phoneNumberId         String                @unique
+  wabaId                String
+  displayPhoneNumber    String?
+  verifiedName          String?
+  /// AES-256-GCM ciphertext ("v1:iv:tag:data"). Plaintext tokens are never stored.
+  accessTokenCiphertext String?
+  status                WhatsAppAccountStatus @default(ACTIVE)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  conversations Conversation[]
+
+  @@index([organizationId])
+}
+
+model Contact {
+  id             String    @id @default(cuid())
+  organizationId String
+  /// WhatsApp ID (normally the phone number in international format, without '+').
+  waId           String
+  profileName    String?
+  displayName    String?
+  /// When set, no automated (AI) messages may be sent to this contact.
+  optedOutAt     DateTime?
+  lastInboundAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  conversations Conversation[]
+  leads         Lead[]
+
+  @@unique([organizationId, waId])
+}
+
+model Conversation {
+  id                String             @id @default(cuid())
+  organizationId    String
+  contactId         String
+  whatsappAccountId String
+  status            ConversationStatus @default(OPEN)
+  aiEnabled         Boolean            @default(true)
+  assignedUserId    String?
+  lastInboundAt     DateTime?
+  lastMessageAt     DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  whatsappAccount WhatsAppAccount @relation(fields: [whatsappAccountId], references: [id], onDelete: Restrict)
+  assignedUser    User?           @relation("ConversationAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages        Message[]
+  leads           Lead[]
+
+  @@index([organizationId, status, lastMessageAt])
+  @@index([contactId])
+  @@index([whatsappAccountId])
+}
+
+model Message {
+  id             String            @id @default(cuid())
+  organizationId String
+  conversationId String
+  direction      MessageDirection
+  senderType     MessageSenderType
+  type           MessageType       @default(TEXT)
+  body           String?           @db.Text
+  /// WhatsApp message ID (wamid). Unique per tenant for idempotent ingestion.
+  waMessageId    String?
+  status         MessageStatus
+  errorCode      Int?
+  errorMessage   String?
+  metadata       Json?
+  sentByUserId   String?
+  /// Timestamp reported by WhatsApp.
+  waTimestamp    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  sentBy       User?        @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, waMessageId])
+  @@index([conversationId, createdAt])
+}
+
+model Lead {
+  id             String     @id @default(cuid())
+  organizationId String
+  contactId      String
+  conversationId String?
+  status         LeadStatus @default(NEW)
+  title          String?
+  source         String?
+  notes          String?    @db.Text
+  estimatedValue Decimal?   @db.Decimal(12, 2)
+  /// ISO 4217 currency code.
+  currency       String?    @db.VarChar(3)
+  ownerUserId    String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  contact      Contact       @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  owner        User?         @relation("LeadOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([contactId])
+}
+
+model KnowledgeDocument {
+  id              String                  @id @default(cuid())
+  organizationId  String
+  title           String
+  sourceType      KnowledgeSourceType     @default(MANUAL)
+  sourceUri       String?
+  content         String?                 @db.Text
+  status          KnowledgeDocumentStatus @default(DRAFT)
+  /// sha256 of content; detects re-uploads of identical documents.
+  checksum        String?
+  createdByUserId String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy    User?            @relation("DocumentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  chunks       KnowledgeChunk[]
+
+  @@index([organizationId, status])
+}
+
+model KnowledgeChunk {
+  id             String   @id @default(cuid())
+  organizationId String
+  documentId     String
+  index          Int
+  content        String   @db.Text
+  tokenEstimate  Int
+  createdAt      DateTime @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  document     KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, index])
+  @@index([organizationId])
+}
+
+/// Durable job queue (see docs/ARCHITECTURE.md §4). Handlers must be idempotent.
+model Job {
+  id             String    @id @default(cuid())
+  type           String
+  payload        Json
+  status         JobStatus @default(PENDING)
+  dedupeKey      String?   @unique
+  organizationId String?
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(8)
+  runAt          DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?   @db.Text
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  targetType     String?
+  targetId       String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  actor        User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+}
