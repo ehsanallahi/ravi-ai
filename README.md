@@ -6,24 +6,24 @@ WhatsApp AI customer support and sales automation, built on the **official Meta 
 API**. Owned by Ravi Stack. This is a standalone product, independent of the Ravi Stack agency
 website.
 
-> **Status: Phase 2 (authentication and tenancy).** Sign-in, required TOTP for owners and admins,
-> organizations, roles, invitations, tenant-isolated data access and the database-backed dashboard
-> are implemented and tested against a real PostgreSQL database. **AI replies and live WhatsApp
-> sending stay disabled.** Nothing has been tested against live Meta, Resend or LLM APIs; that
-> needs your credentials (see [Verification status](#verification-status)).
+> **Status: Phase 3 in progress (Gemini knowledge base and AI playground).** Phase 2 auth and
+> tenancy is complete. The knowledge base (pgvector), Google Gemini RAG and the AI playground are
+> implemented and tested with mocked AI. **Automatic WhatsApp replies and live sending stay
+> disabled.** Nothing has been tested against live Gemini, Meta or Resend APIs; that needs your
+> credentials (see [Verification status](#verification-status)).
 
 - Product: [docs/PRD.md](docs/PRD.md)
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Database: [docs/DATABASE.md](docs/DATABASE.md)
 - Security review: [docs/SECURITY.md](docs/SECURITY.md)
 - Roadmap: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) ·
-  Phase 2: [docs/PHASE_2_PLAN.md](docs/PHASE_2_PLAN.md)
+  Phase 2: [docs/PHASE_2_PLAN.md](docs/PHASE_2_PLAN.md) · Phase 3: [docs/PHASE_3_PLAN.md](docs/PHASE_3_PLAN.md)
 
 ## Stack
 
 pnpm workspaces · Turborepo · TypeScript (strict) · Next.js 16 App Router · Tailwind CSS v4 ·
 shadcn/ui-style components · PostgreSQL + Prisma 6 · Better Auth 1.7 (email/password + TOTP) ·
-Resend (email) · Zod · Vitest · ESLint 9 · Anthropic SDK (pluggable LLM provider).
+Resend (email) · Google Gen AI SDK (Gemini chat + embeddings) · pgvector · Zod · Vitest · ESLint 9.
 
 ## Repository layout
 
@@ -37,9 +37,12 @@ packages/
   db/           Prisma schema, migrations, client, health check, account registration script
   validation/   Zod schemas: environment variables, WhatsApp webhook payloads
   whatsapp/     Signature/subscription verification, payload normalisation, Cloud API client
-  ai-engine/    LLM provider interface, Anthropic adapter, chunking, retrieval, grounded prompts
+  ai-engine/    Provider interfaces, Gemini chat/embedding adapters, grounded prompts, safety checks,
+                pricing, chunking
+  knowledge/    Knowledge base: extraction (txt/md/pdf), pgvector indexing, hybrid retrieval,
+                AI usage limits and cost tracking, assistant pipeline, ai:check / ai:eval scripts
   core/         RBAC, AES-256-GCM secret encryption, logger, shared job types
-  testing/      Local PostgreSQL (embedded binaries), test-database guard, fixtures
+  testing/      Local PostgreSQL (embedded binaries + pgvector), test-database guards, fixtures
 docs/           PRD, architecture, database, implementation plans
 ```
 
@@ -48,9 +51,10 @@ docs/           PRD, architecture, database, implementation plans
 - Node.js **22.9+** (see `.nvmrc`)
 - pnpm 10, pinned in `package.json` (`packageManager`). Enable it with `corepack enable` (from an
   administrator shell on Windows if Node is installed under Program Files).
-- PostgreSQL 15+. For local development, `pnpm db:local` runs a real PostgreSQL 18 from npm
-  binaries; no Docker or system install is needed. A managed instance or
-  [docker-compose.yml](docker-compose.yml) also works.
+- PostgreSQL 15+ with the **pgvector** extension and **UTF-8** encoding. For local development,
+  `pnpm db:local` runs a real PostgreSQL 18 from npm binaries (no Docker or system install). On
+  Windows, `pnpm db:pgvector:setup` builds pgvector once (needs Visual Studio's C++ tools);
+  elsewhere use the `pgvector/pgvector` Docker image.
 
 ## Local setup
 
@@ -58,7 +62,10 @@ docs/           PRD, architecture, database, implementation plans
 # 1. Install dependencies (also generates the Prisma client)
 pnpm install
 
-# 2. Start local PostgreSQL in its own terminal. The first run creates ravi_ai_dev and
+# 2. (Windows, once) Build pgvector for the local PostgreSQL
+pnpm db:pgvector:setup
+
+#    Start local PostgreSQL in its own terminal. The first run creates ravi_ai_dev and
 #    ravi_ai_test, generates a local-only password, and prints both connection strings.
 pnpm db:local
 
@@ -68,6 +75,7 @@ cp .env.example .env
 #    BETTER_AUTH_SECRET:  openssl rand -base64 32
 #    ENCRYPTION_KEY:      openssl rand -base64 32
 #    EMAIL_PROVIDER:      "outbox" locally (emails are written to .data/outbox, nothing is sent)
+#    GEMINI_API_KEY:      optional; enables the knowledge base and AI playground (server-side only)
 
 # 4. Review, then apply the migrations (additive only; see docs/DATABASE.md)
 pnpm db:migrate:deploy
@@ -89,6 +97,22 @@ Then:
    authenticator app before they can open the organization. TOTP is required for those roles.
 3. Invite teammates from **Team**. With the outbox adapter, the invitation link is also shown
    once in the UI so you can test it locally.
+
+### AI with Google Gemini (optional)
+
+1. Put a **paid-tier** Gemini API key in `.env` as `GEMINI_API_KEY`. It stays on the server.
+   Google may use free-tier data to improve its products.
+2. `pnpm ai:check` confirms which models your key can access, and that the chat model, the
+   embedding model and the 768 dimensions work. It sends synthetic text only.
+3. `pnpm ai:eval -- --models gemini-3.1-flash-lite,gemini-3.5-flash-lite --yes` compares models
+   on synthetic English, Urdu and Roman Urdu cases (a few cents).
+4. In the app, an **owner** enables AI data processing under **Settings**. Admins then add
+   documents under **Knowledge base**, index them, and test answers in the **AI playground**.
+
+The assistant answers only from indexed knowledge and cites its sources. It hands off when it is
+unsure, when asked for a person, or when a draft states a price, number or link that is not in the
+sources. Every call is metered against the organization's monthly budget. **Nothing in the
+playground is sent to WhatsApp, and automatic replies stay off (`AI_AUTO_REPLY_ENABLED=false`).**
 
 ### Production email (Resend)
 
@@ -137,19 +161,22 @@ Inbound messages then appear under **Conversations** and **Contacts** for that o
 
 ## Scripts
 
-| Command                  | What it does                                                    |
-| ------------------------ | --------------------------------------------------------------- |
-| `pnpm dev`               | Web app and worker in watch mode                                |
-| `pnpm build`             | Production build (Next.js + tsup worker bundle)                 |
-| `pnpm typecheck`         | `tsc --noEmit` in every package                                 |
-| `pnpm test`              | Unit tests                                                      |
-| `pnpm test:integration`  | Integration tests against a throwaway PostgreSQL (see below)    |
-| `pnpm lint`              | ESLint over the repository                                      |
-| `pnpm check`             | Lint, type-check, unit tests, integration tests and build       |
-| `pnpm db:local`          | Local PostgreSQL for development (`.data/postgres`, port 54329) |
-| `pnpm db:migrate:deploy` | Applies pending migrations                                      |
-| `pnpm db:migrate:dev`    | Creates a migration. **Local, disposable databases only.**      |
-| `pnpm db:studio`         | Prisma Studio                                                   |
+| Command                  | What it does                                                          |
+| ------------------------ | --------------------------------------------------------------------- |
+| `pnpm dev`               | Web app and worker in watch mode                                      |
+| `pnpm build`             | Production build (Next.js + tsup worker bundle)                       |
+| `pnpm typecheck`         | `tsc --noEmit` in every package                                       |
+| `pnpm test`              | Unit tests                                                            |
+| `pnpm test:integration`  | Integration tests against a throwaway PostgreSQL (see below)          |
+| `pnpm lint`              | ESLint over the repository                                            |
+| `pnpm check`             | Lint, type-check, unit tests, integration tests and build             |
+| `pnpm db:local`          | Local PostgreSQL for development (`.data/pg-utf8`, port 54329)        |
+| `pnpm db:pgvector:setup` | Windows: builds pgvector for the local PostgreSQL (once)              |
+| `pnpm ai:check`          | Verifies your Gemini key, models and dimensions (synthetic text only) |
+| `pnpm ai:eval`           | Synthetic multilingual model evaluation (needs `--yes`; costs cents)  |
+| `pnpm db:migrate:deploy` | Applies pending migrations                                            |
+| `pnpm db:migrate:dev`    | Creates a migration. **Local, disposable databases only.**            |
+| `pnpm db:studio`         | Prisma Studio                                                         |
 
 There are intentionally no scripts for `migrate reset` or `db push --accept-data-loss`.
 

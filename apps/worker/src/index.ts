@@ -1,13 +1,12 @@
 import { hostname } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createProvider } from "@ravi/ai-engine";
 import { createLogger, errorMessage, parseEncryptionKey } from "@ravi/core";
 import { checkDatabaseHealth, prisma } from "@ravi/db";
+import { createAiRuntime } from "@ravi/knowledge";
 import { parseEnv, workerEnvSchema } from "@ravi/validation";
 import { handlers } from "./handlers";
 import type { WorkerContext } from "./jobs";
 import { PostgresJobQueue } from "./queue";
-import { PostgresFullTextRetriever } from "./retriever";
 import { runJob } from "./runner";
 
 const STALE_SWEEP_INTERVAL_MS = 60_000;
@@ -24,12 +23,7 @@ async function main() {
     prisma,
     env,
     log,
-    provider: createProvider(
-      env.AI_PROVIDER === "anthropic"
-        ? { provider: "anthropic", apiKey: env.ANTHROPIC_API_KEY, model: env.AI_MODEL }
-        : { provider: "disabled" },
-    ),
-    retriever: new PostgresFullTextRetriever(prisma),
+    ai: createAiRuntime(env),
     encryptionKey: env.ENCRYPTION_KEY ? parseEncryptionKey(env.ENCRYPTION_KEY) : null,
     now: () => new Date(),
   };
@@ -45,7 +39,8 @@ async function main() {
 
   log.info("worker started", {
     aiAutoReply: env.AI_AUTO_REPLY_ENABLED,
-    aiProvider: env.AI_PROVIDER,
+    aiConfigured: ctx.ai.configured,
+    chatModel: ctx.ai.models.chat,
     batchSize: env.WORKER_BATCH_SIZE,
   });
 

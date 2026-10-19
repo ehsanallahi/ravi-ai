@@ -57,6 +57,8 @@ export async function startCluster(options: {
     password: options.password,
     authMethod: "scram-sha-256",
     persistent: options.persistent,
+    // Always UTF-8: Windows initdb otherwise defaults to WIN1252, which cannot store Urdu.
+    initdbFlags: ["--encoding=UTF8", "--locale=C"],
     postgresFlags: ["-c", "listen_addresses=127.0.0.1"],
     onLog: () => undefined,
     onError: () => undefined,

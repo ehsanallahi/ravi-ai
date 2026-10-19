@@ -4,6 +4,7 @@ import {
   type LucideIcon,
   MessagesSquare,
   Settings,
+  Sparkles,
   Target,
   UserCog,
   Users,
@@ -22,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Contacts", segment: "/contacts", icon: Users },
   { title: "Leads", segment: "/leads", icon: Target },
   { title: "Knowledge base", segment: "/knowledge", icon: BookOpen },
+  { title: "AI playground", segment: "/ai", icon: Sparkles },
   { title: "Team", segment: "/team", icon: UserCog },
   { title: "Settings", segment: "/settings", icon: Settings },
 ];

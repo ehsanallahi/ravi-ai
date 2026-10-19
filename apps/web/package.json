@@ -34,7 +34,9 @@
     "resend": "^6.34.1",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.7.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "@ravi/knowledge": "workspace:*",
+    "@ravi/ai-engine": "workspace:*"
   },
   "devDependencies": {
     "@next/env": "16.4.2",

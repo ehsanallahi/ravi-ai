@@ -3,19 +3,22 @@
  *
  *   pnpm db:local          # start (initialises on first run), Ctrl+C to stop
  *
- * - Data lives in <repo>/.data/postgres (git-ignored). Stopping never deletes it.
+ * - Data lives in <repo>/.data/pg-utf8 (git-ignored). Stopping never deletes it.
  * - Listens on 127.0.0.1 only, port LOCAL_PG_PORT (default 54329).
  * - Creates `ravi_ai_dev` and `ravi_ai_test` on first run. A random password is generated once
- *   and stored in .data/postgres-credentials.json (git-ignored). It is a local-only credential.
+ *   and stored in .data/pg-utf8-credentials.json (git-ignored). It is a local-only credential.
  * - Does not run migrations. Review them, then run `pnpm db:migrate:deploy`.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { ensurePgvectorInstalled } from "../src/pgvector";
 import { randomPassword, REPO_ROOT, startCluster } from "../src/postgres";
 
 const DATA_ROOT = path.join(REPO_ROOT, ".data");
-const DATA_DIR = path.join(DATA_ROOT, "postgres");
-const CREDENTIALS_FILE = path.join(DATA_ROOT, "postgres-credentials.json");
+// UTF-8 cluster. (An older ".data/postgres" cluster may exist with the Windows default WIN1252
+// encoding, which cannot store Urdu; it is left untouched and can be deleted manually.)
+const DATA_DIR = path.join(DATA_ROOT, "pg-utf8");
+const CREDENTIALS_FILE = path.join(DATA_ROOT, "pg-utf8-credentials.json");
 const DATABASES = ["ravi_ai_dev", "ravi_ai_test"];
 
 async function main() {
@@ -34,6 +37,7 @@ async function main() {
       .password;
   }
 
+  ensurePgvectorInstalled();
   const cluster = await startCluster({
     databaseDir: DATA_DIR,
     port,
@@ -49,7 +53,7 @@ async function main() {
   console.log(
     `PostgreSQL is running on 127.0.0.1:${port} (data: ${path.relative(REPO_ROOT, DATA_DIR)})`,
   );
-  console.log("Connection strings (local only; also stored in .data/postgres-credentials.json):");
+  console.log("Connection strings (local only; also stored in .data/pg-utf8-credentials.json):");
   for (const db of DATABASES) console.log(`  ${db}: ${cluster.urlFor(db)}`);
   if (firstRun) {
     console.log("\nFirst run: put the ravi_ai_dev URL in .env as DATABASE_URL, then run:");

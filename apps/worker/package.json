@@ -17,7 +17,8 @@
     "@ravi/core": "workspace:*",
     "@ravi/db": "workspace:*",
     "@ravi/validation": "workspace:*",
-    "@ravi/whatsapp": "workspace:*"
+    "@ravi/whatsapp": "workspace:*",
+    "@ravi/knowledge": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

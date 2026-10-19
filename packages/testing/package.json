@@ -7,12 +7,14 @@
   "exports": {
     ".": "./src/index.ts",
     "./global-setup": "./src/global-setup.ts",
-    "./setup-env": "./src/setup-env.ts"
+    "./setup-env": "./src/setup-env.ts",
+    "./pgvector": "./src/pgvector.ts"
   },
   "scripts": {
     "db:local": "tsx scripts/local-db.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:pgvector:setup": "tsx scripts/setup-pgvector.ts"
   },
   "devDependencies": {
     "tsx": "^4.23.15"

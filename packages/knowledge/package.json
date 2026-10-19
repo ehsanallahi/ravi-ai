@@ -1,0 +1,30 @@
+{
+  "name": "@ravi/knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Knowledge base and RAG: extraction, chunking, Gemini embeddings, pgvector retrieval, AI usage limits.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./extract": "./src/extract.ts"
+  },
+  "scripts": {
+    "ai:check": "tsx --env-file-if-exists=../../.env scripts/ai-check.ts",
+    "ai:eval": "tsx --env-file-if-exists=../../.env scripts/ai-eval.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@google/genai": "2.30.0",
+    "@ravi/ai-engine": "workspace:*",
+    "@ravi/core": "workspace:*",
+    "@ravi/db": "workspace:*",
+    "@ravi/validation": "workspace:*",
+    "unpdf": "1.9.1"
+  },
+  "devDependencies": {
+    "@ravi/testing": "workspace:*",
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,6 +1,12 @@
 import { type ChatMessage, generateGroundedReply, isRetryableProviderError } from "@ravi/ai-engine";
 import { errorMessage } from "@ravi/core";
 import {
+  AiGuardError,
+  assertAiAllowed,
+  PgHybridRetriever,
+  withUsageRecording,
+} from "@ravi/knowledge";
+import {
   isWithinServiceWindow,
   JOB_TYPES,
   type JobHandler,
@@ -63,11 +69,29 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     content: m.body ?? "",
   }));
 
+  // Same gates as the dashboard: provider configured, owner consent, budget and hourly cap.
+  try {
+    await assertAiAllowed(ctx.prisma, organization.id, ctx.ai);
+  } catch (err) {
+    if (err instanceof AiGuardError) {
+      log.info("ai reply skipped: guard", { reason: err.reason });
+      return;
+    }
+    throw err;
+  }
+
+  const recorded = withUsageRecording(
+    ctx.prisma,
+    { chat: ctx.ai.chat, embeddings: ctx.ai.embeddings },
+    { organizationId: organization.id, feature: "AUTO_REPLY" },
+    ctx.ai.prices,
+  );
+
   let decision;
   try {
     decision = await generateGroundedReply({
-      provider: ctx.provider,
-      retriever: ctx.retriever,
+      provider: recorded.chat,
+      retriever: new PgHybridRetriever(ctx.prisma, recorded.embeddings, ctx.ai.retrieval),
       organizationId: organization.id,
       businessName: organization.name,
       history,
@@ -98,7 +122,8 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
         status: "PENDING",
         metadata: {
           model: decision.model,
-          sourceChunkIds: decision.sourceChunkIds,
+          sourceChunkIds: decision.sources.filter((s) => s.cited).map((s) => s.chunkId),
+          language: decision.language,
           inReplyTo: inbound.id,
         },
       },

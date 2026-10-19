@@ -1,32 +1,88 @@
-import Anthropic from "@anthropic-ai/sdk";
-import type { LLMProvider } from "../types";
-import { AnthropicProvider } from "./anthropic";
-import { DisabledProvider, ProviderDisabledError } from "./disabled";
+import type { EmbeddingProvider, LLMProvider } from "../types";
+import { DisabledEmbeddingProvider, DisabledProvider, ProviderDisabledError } from "./disabled";
+import {
+  createGeminiModelsClient,
+  GeminiChatProvider,
+  GeminiEmbeddingProvider,
+  type GeminiModelsClient,
+  type GeminiThinkingLevel,
+} from "./gemini";
 
-export { AnthropicProvider } from "./anthropic";
-export { DisabledProvider, ProviderDisabledError } from "./disabled";
+export { DisabledEmbeddingProvider, DisabledProvider, ProviderDisabledError } from "./disabled";
+export {
+  createGeminiModelsClient,
+  EmbeddingDimensionError,
+  GeminiChatProvider,
+  GeminiEmbeddingProvider,
+  type GeminiModelsClient,
+  type GeminiThinkingLevel,
+} from "./gemini";
 
-export type ProviderConfig =
-  { provider: "disabled" } | { provider: "anthropic"; apiKey?: string; model: string };
+export type AiProviderConfig =
+  | { provider: "disabled" }
+  | {
+      provider: "gemini";
+      apiKey: string;
+      chatModel: string;
+      embeddingModel: string;
+      embeddingDimensions: number;
+      thinkingLevel?: GeminiThinkingLevel;
+      /** Inject a mock in tests. */
+      client?: GeminiModelsClient;
+    };
 
-export function createProvider(config: ProviderConfig): LLMProvider {
-  switch (config.provider) {
-    case "anthropic":
-      return new AnthropicProvider({ apiKey: config.apiKey, model: config.model });
-    case "disabled":
-      return new DisabledProvider();
+export interface AiProviders {
+  chat: LLMProvider;
+  embeddings: EmbeddingProvider;
+  enabled: boolean;
+}
+
+/**
+ * Builds the configured providers. Gemini is the only implemented provider; the interfaces stay
+ * provider-neutral so others can be added later. "disabled" fails closed.
+ */
+export function createAiProviders(config: AiProviderConfig): AiProviders {
+  if (config.provider === "disabled") {
+    return {
+      chat: new DisabledProvider(),
+      embeddings: new DisabledEmbeddingProvider(),
+      enabled: false,
+    };
   }
+  const client = config.client ?? createGeminiModelsClient(config.apiKey);
+  return {
+    chat: new GeminiChatProvider({
+      client,
+      model: config.chatModel,
+      thinkingLevel: config.thinkingLevel,
+    }),
+    embeddings: new GeminiEmbeddingProvider({
+      client,
+      model: config.embeddingModel,
+      dimensions: config.embeddingDimensions,
+    }),
+    enabled: true,
+  };
+}
+
+/** HTTP status from provider errors (the Gen AI SDK's ApiError carries `status`). */
+export function providerErrorStatus(err: unknown): number | null {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status === "number" ? status : null;
 }
 
 /** True for transient failures (rate limits, overload, network) that are worth retrying. */
 export function isRetryableProviderError(err: unknown): boolean {
   if (err instanceof ProviderDisabledError) return false;
-  if (err instanceof Anthropic.APIConnectionError) return true;
-  if (err instanceof Anthropic.APIError) {
-    const status = err.status;
-    return (
-      status === undefined || status === 408 || status === 409 || status === 429 || status >= 500
-    );
-  }
-  return true;
+  const status = providerErrorStatus(err);
+  if (status === null) return true; // network/timeout
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** A short, non-sensitive error code for usage logs (never the message, which may echo input). */
+export function providerErrorCode(err: unknown): string {
+  if (err instanceof ProviderDisabledError) return "provider_disabled";
+  const status = providerErrorStatus(err);
+  if (status !== null) return `http_${status}`;
+  return err instanceof Error ? err.name : "unknown";
 }

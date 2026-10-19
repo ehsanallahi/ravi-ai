@@ -189,3 +189,27 @@ browser ── /api/auth/* ──► Better Auth (email/password, sessions, veri
   disabled.
 - **Email** goes through an `EmailSender` interface: `ResendEmailSender` (production),
   `OutboxEmailSender` (local `.data/outbox`), `MemoryEmailSender` (tests).
+
+## 11. AI and knowledge base (Phase 3, Google Gemini)
+
+```
+Knowledge base UI ─► extract (txt/md/pdf, server) ─► KnowledgeDocument (DRAFT)
+                       └─ Index (Owner/Admin + consent + budget) ─► chunk ─► Gemini embeddings
+                                                                      └─► KnowledgeChunk.embedding (pgvector)
+AI playground ─► askAssistant (consent, budget, hourly cap)
+                  ├─ human-request check (EN / Roman Urdu / Urdu) → handoff
+                  ├─ PgHybridRetriever (org-scoped: pgvector cosine + full-text, RRF)
+                  │    └─ nothing relevant → handoff (no model call)
+                  ├─ Gemini generateContent (structured JSON: answer, handoff, sourceIds, language)
+                  ├─ grounding check (numbers / URLs must appear in sources) → else handoff
+                  └─ AiSuggestion (sources, cost) → human review (approve/reject; never sent)
+Every provider call ─► AiUsageEvent (model, tokens, dims, cost, latency, error code)
+```
+
+- `@ravi/ai-engine` holds provider-neutral interfaces (`LLMProvider`, `EmbeddingProvider`), the
+  Gemini adapters (official `@google/genai`; the client is injectable for tests), the prompt,
+  safety checks and pricing. It has no database code.
+- `@ravi/knowledge` holds the database-backed pipeline (indexing, retrieval, guards, usage,
+  assistant). It is shared by the web app and the worker.
+- The worker's `ai.reply` handler uses the same guards and pipeline, but stays disabled
+  (`AI_AUTO_REPLY_ENABLED=false`).

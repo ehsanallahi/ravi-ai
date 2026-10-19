@@ -3,6 +3,9 @@ import type { Permission } from "@ravi/core";
 import { createLogger } from "@ravi/core";
 import { prisma } from "@ravi/db";
 import { notFound, redirect } from "next/navigation";
+import { providerErrorStatus } from "@ravi/ai-engine";
+import { AiConfigError, AiGuardError, AssistantInputError, IndexingError } from "@ravi/knowledge";
+import { ExtractionError } from "@ravi/knowledge/extract";
 import { ZodError } from "zod";
 import type { ActionState } from "@/components/ui/form";
 import { UserInputError } from "../auth/users";
@@ -54,6 +57,27 @@ function errorToState(err: unknown): ActionState {
     return { ok: false, error: err.message };
   if (err instanceof ZodError)
     return { ok: false, error: err.issues[0]?.message ?? "Invalid input" };
+  // AI and knowledge errors carry messages written for administrators (no secrets, no prompts).
+  if (
+    err instanceof AiGuardError ||
+    err instanceof AiConfigError ||
+    err instanceof IndexingError ||
+    err instanceof AssistantInputError ||
+    err instanceof ExtractionError
+  ) {
+    return { ok: false, error: err.message };
+  }
+  const status = providerErrorStatus(err);
+  if (status !== null) {
+    log.warn("AI provider error", { status });
+    return {
+      ok: false,
+      error:
+        status === 429
+          ? "The AI provider is rate-limiting requests. Try again in a minute."
+          : `The AI provider returned an error (HTTP ${status}). Try again later.`,
+    };
+  }
   log.error("action failed", { error: err instanceof Error ? err.message : String(err) });
   return { ok: false, error: "Something went wrong. Please try again." };
 }
