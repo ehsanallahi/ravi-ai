@@ -13,7 +13,7 @@ import {
 import { Brand } from "./brand";
 import { SidebarNav } from "./sidebar-nav";
 
-export function MobileNav() {
+export function MobileNav({ orgSlug }: { orgSlug: string }) {
   const [open, setOpen] = useState(false);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -28,9 +28,9 @@ export function MobileNav() {
           Main sections of the Ravi AI dashboard
         </SheetDescription>
         <div className="flex h-16 items-center">
-          <Brand />
+          <Brand href={`/o/${orgSlug}`} />
         </div>
-        <SidebarNav onNavigate={() => setOpen(false)} />
+        <SidebarNav orgSlug={orgSlug} onNavigate={() => setOpen(false)} />
       </SheetContent>
     </Sheet>
   );

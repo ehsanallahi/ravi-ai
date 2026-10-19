@@ -21,6 +21,74 @@ export const webhookEnvSchema = z.object({
 });
 export type WebhookEnv = z.infer<typeof webhookEnvSchema>;
 
+/** Environment for authentication and email in apps/web. */
+export const authEnvSchema = z
+  .object({
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    BETTER_AUTH_SECRET: z
+      .string({ error: "BETTER_AUTH_SECRET is required" })
+      .min(32, "BETTER_AUTH_SECRET must be at least 32 characters (openssl rand -base64 32)"),
+    BETTER_AUTH_URL: z.url({ error: "BETTER_AUTH_URL must be the public base URL of the app" }),
+    /**
+     * "closed" is the only supported mode: there is no public sign-up. Accounts are created by the
+     * owner CLI or by accepting an invitation issued by an Owner or Admin. Any other mode needs an
+     * explicit product decision.
+     */
+    REGISTRATION_MODE: z.literal("closed").default("closed"),
+    /**
+     * Header(s) carrying the real client IP, used for rate limiting. Your proxy MUST overwrite
+     * it (for example, Cloudflare: "cf-connecting-ip"). Comma-separated.
+     */
+    AUTH_IP_HEADERS: z
+      .string()
+      .default("x-forwarded-for")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((h) => h.trim().toLowerCase())
+          .filter(Boolean),
+      )
+      .pipe(z.array(z.string().regex(/^[a-z0-9-]+$/, "Invalid header name")).min(1)),
+    EMAIL_PROVIDER: z.enum(["resend", "outbox"]).default("outbox"),
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
+  })
+  .superRefine((env, ctx) => {
+    if (env.EMAIL_PROVIDER === "resend") {
+      if (!env.RESEND_API_KEY) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["RESEND_API_KEY"],
+          message: "required for EMAIL_PROVIDER=resend",
+        });
+      }
+      if (!env.EMAIL_FROM) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["EMAIL_FROM"],
+          message: "required for EMAIL_PROVIDER=resend",
+        });
+      }
+    }
+    if (env.NODE_ENV === "production") {
+      if (env.EMAIL_PROVIDER !== "resend") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["EMAIL_PROVIDER"],
+          message: "production requires EMAIL_PROVIDER=resend (the outbox adapter is local-only)",
+        });
+      }
+      if (!env.BETTER_AUTH_URL.startsWith("https://")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["BETTER_AUTH_URL"],
+          message: "must use https in production",
+        });
+      }
+    }
+  });
+export type AuthEnv = z.infer<typeof authEnvSchema>;
+
 /** Environment for apps/worker. */
 export const workerEnvSchema = z
   .object({

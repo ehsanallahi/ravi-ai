@@ -49,4 +49,28 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
     },
   },
+  {
+    // Tenant isolation: pages, components and actions must go through src/server (which requires
+    // a TenantContext). Direct Prisma access is only allowed in the server layer and API routes.
+    files: [
+      "apps/web/src/app/**/*.{ts,tsx}",
+      "apps/web/src/components/**/*.{ts,tsx}",
+      "apps/web/src/lib/**/*.{ts,tsx}",
+    ],
+    ignores: ["apps/web/src/app/api/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@ravi/db",
+              importNames: ["prisma", "PrismaClient"],
+              message: "Use the tenant-scoped data layer in src/server instead of Prisma directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

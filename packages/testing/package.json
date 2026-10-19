@@ -1,0 +1,25 @@
+{
+  "name": "@ravi/testing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local PostgreSQL tooling and integration-test harness. Never used in production.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./global-setup": "./src/global-setup.ts",
+    "./setup-env": "./src/setup-env.ts"
+  },
+  "scripts": {
+    "db:local": "tsx scripts/local-db.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@ravi/core": "workspace:*",
+    "@ravi/db": "workspace:*",
+    "embedded-postgres": "18.4.0-beta.17"
+  }
+}

@@ -1,0 +1,59 @@
+# Ravi AI — Security Review (Phase 2)
+
+**Scope:** authentication, sessions, 2FA, authorization, tenant isolation, invitations, secrets,
+dependencies and CI, on branch `feat/phase-2-auth-tenancy`.
+**Date:** 2026-10-17. **Method:** code review, Better Auth 1.7.10 source inspection, targeted
+integration tests against PostgreSQL, gitleaks and `pnpm audit`.
+
+## Findings and fixes
+
+| #   | Severity         | Finding                                                                                                                                                                                                                                     | Status                                                                                                                                                                                                                                              |
+| --- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Medium           | **Open redirect after login.** `safeNextPath` accepted `/<TAB>/evil.example`, `/<LF>/…` and `/\evil.example`; browsers normalise those into `//evil.example`.                                                                               | **Fixed.** Rejects whitespace, control characters and backslashes, then confirms the parsed URL is same-origin. 14 unit tests.                                                                                                                      |
+| 2   | Medium           | **Required 2FA could be skipped for 30 days.** Better Auth honours `trustDevice: true` on `/two-factor/verify-*`, so any client could opt out of entering a code on later sign-ins, including owners and admins, for whom 2FA is mandatory. | **Fixed.** A `hooks.before` middleware rejects `trustDevice` (400). Integration test.                                                                                                                                                               |
+| 3   | Medium           | **Rate limits were IP-only.** An attacker rotating IPs, or spoofing `X-Forwarded-For` when no proxy overwrites it, could brute-force a password or flood reset emails.                                                                      | **Fixed.** Per-account throttles keyed by email hash: sign-in 10 per 15 min, password-reset and verification emails 5 per hour, applied atomically in PostgreSQL. The trusted IP header is now configurable (`AUTH_IP_HEADERS`). Integration tests. |
+| 4   | Low              | **Unused auth endpoints exposed:** `/delete-user`, `/change-email`, `/update-user`, social sign-in, account linking, token endpoints.                                                                                                       | **Fixed.** Disabled with `disabledPaths` (they return 404). Integration test.                                                                                                                                                                       |
+| 5   | Low              | **CSRF checks off in test environments.** Better Auth disables origin and CSRF checks when it detects `NODE_ENV=test`.                                                                                                                      | **Fixed in Phase 2** (pinned on explicitly); covered by tests.                                                                                                                                                                                      |
+| 6   | Low              | **No Content-Security-Policy.**                                                                                                                                                                                                             | **Partly fixed.** Baseline CSP: `frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`. A `script-src` with nonces is planned (Phase 3).                                                                                  |
+| 7   | Low              | `getOrganizationSettings` relied on the page for its permission check.                                                                                                                                                                      | **Fixed.** Asserts `settings:manage` itself (defense in depth).                                                                                                                                                                                     |
+| 8   | Low (dependency) | `deepmerge-ts <8` (GHSA, stack exhaustion) reached production dependencies through Better Auth's optional `prisma` peer → `@prisma/config`. Not loaded at runtime, but flagged by `pnpm audit --prod`.                                      | **Fixed.** pnpm override to `^8.0.2`; Prisma CLI verified via migrations and the full test suite. `pnpm audit --prod`: no known vulnerabilities.                                                                                                    |
+
+## Verified controls (no change needed)
+
+- Public sign-up disabled; accounts only from the owner CLI or invitations.
+- Database sessions, no cookie cache (revocation takes effect immediately); HttpOnly,
+  `SameSite=Lax`, `Secure` with the `__Secure-` prefix in production. The proxy's cookie check
+  handles the prefix (verified in Better Auth source).
+- Sessions revoked on sign-out, on password reset and optionally on password change. The 2FA
+  login challenge rotates the session.
+- TOTP secrets and backup codes encrypted with `BETTER_AUTH_SECRET`; Better Auth's account lockout
+  after 10 failed second-factor attempts is on by default.
+- `resolveTenant` is the only source of a `TenantContext`; non-members get 404; all reads filter by
+  `organizationId`, and writes use `updateMany({ id, organizationId })` with a `count === 1` check.
+  The ESLint ban on Prisma imports in pages, components and actions was verified with a probe file.
+- Server Action arguments (`orgSlug`, IDs) are client-controlled, so every action re-resolves the
+  tenant and permission; nothing trusts bound arguments.
+- Invitations: 256-bit token, SHA-256 at rest, 7-day expiry, single use (conditional update),
+  bound to one email; unknown tokens fail before any password hashing.
+- WhatsApp tokens are never selected by dashboard queries.
+- Production refuses to start auth with the local email outbox or a non-https base URL.
+
+## Accepted risks and follow-ups
+
+| Risk                                                                                                                                  | Rationale / mitigation                                                                                               | Follow-up                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| A per-account throttle lets someone temporarily lock a victim out by failing 10 sign-ins                                              | Standard trade-off; the lock lasts 15 minutes and does not affect existing sessions                                  | Notify the account owner on throttle (Phase 3)              |
+| `X-Forwarded-For` is trusted by default                                                                                               | The production proxy must overwrite it, or `AUTH_IP_HEADERS` must name the proxy's header (e.g. `cf-connecting-ip`)  | Deployment checklist item                                   |
+| Invitation tokens appear in URL paths (server logs)                                                                                   | Single-use, 7-day expiry; `Referrer-Policy: strict-origin-when-cross-origin` keeps them out of third-party referrers | Scrub `/invite/*` paths from access logs                    |
+| CSP has no `script-src`                                                                                                               | Needs per-request nonces with Next.js                                                                                | Phase 3                                                     |
+| Dev-only advisories: `braces` (via `@next/eslint-plugin-next`, no patched version), `esbuild` dev server on Windows (via `tsup`, low) | Not shipped to production; the esbuild dev server is never run                                                       | Re-check on dependency updates; CI reports them as warnings |
+| Scrypt (Better Auth default) rather than argon2id                                                                                     | Strong, memory-hard, no native dependency                                                                            | Revisit if a native build is acceptable                     |
+
+## CI security gates
+
+- **gitleaks** on full history (default rules plus a narrow allowlist of synthetic values in
+  `.gitleaks.toml`). A local run on 2026-10-17 found 0 leaks, with and without the allowlist.
+- **`pnpm audit --prod --audit-level=high`** fails the build; the full audit is reported as a warning.
+- Destructive-migration guard (`DROP`, `TRUNCATE`, `RENAME`, column type changes) fails the build.
+- CI uses no repository secrets: a disposable PostgreSQL container with a CI-only password, and
+  synthetic fixtures.

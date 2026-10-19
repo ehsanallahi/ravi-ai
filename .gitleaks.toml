@@ -1,0 +1,15 @@
+# Gitleaks configuration: the default ruleset plus a narrow allowlist for known synthetic test
+# values. Never allowlist a real credential; rotate it instead.
+title = "Ravi AI gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic placeholders and CI-only throwaway values"
+regexes = [
+  '''ci-only-throwaway-password''',
+  '''integration-test-secret-not-used-anywhere-else-0123456789''',
+  '''test-app-secret''',
+  '''postgresql://(USER:PASSWORD|u:p|placeholder:placeholder|user:pass|nobody:nothing)@''',
+]

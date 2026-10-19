@@ -1,6 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 
-export * from "@prisma/client";
+// Explicit value exports (not `export *`) so bundlers don't have to guess the exports of the
+// CommonJS Prisma client. Model and enum types are re-exported as types.
+export { Prisma, PrismaClient } from "@prisma/client";
+export type * from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as { __raviPrisma?: PrismaClient };
 
@@ -15,6 +18,33 @@ export const prisma: PrismaClient =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.__raviPrisma = prisma;
+
+export interface DatabaseHealth {
+  ok: boolean;
+  latencyMs: number;
+}
+
+/** Readiness probe: a trivial query with a timeout. Never returns connection details. */
+export async function checkDatabaseHealth(
+  client: PrismaClient = prisma,
+  timeoutMs = 2_000,
+): Promise<DatabaseHealth> {
+  const started = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      client.$queryRaw`SELECT 1`,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      }),
+    ]);
+    return { ok: true, latencyMs: Date.now() - started };
+  } catch {
+    return { ok: false, latencyMs: Date.now() - started };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Prisma error code for unique constraint violations. */
 export const UNIQUE_VIOLATION = "P2002";

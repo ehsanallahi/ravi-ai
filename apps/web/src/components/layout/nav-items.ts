@@ -5,20 +5,23 @@ import {
   MessagesSquare,
   Settings,
   Target,
+  UserCog,
   Users,
 } from "lucide-react";
 
 export interface NavItem {
   title: string;
-  href: string;
+  /** Path relative to /o/[orgSlug]. */
+  segment: string;
   icon: LucideIcon;
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { title: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { title: "Conversations", href: "/conversations", icon: MessagesSquare },
-  { title: "Contacts", href: "/contacts", icon: Users },
-  { title: "Leads", href: "/leads", icon: Target },
-  { title: "Knowledge base", href: "/knowledge", icon: BookOpen },
-  { title: "Settings", href: "/settings", icon: Settings },
+  { title: "Overview", segment: "", icon: LayoutDashboard },
+  { title: "Conversations", segment: "/conversations", icon: MessagesSquare },
+  { title: "Contacts", segment: "/contacts", icon: Users },
+  { title: "Leads", segment: "/leads", icon: Target },
+  { title: "Knowledge base", segment: "/knowledge", icon: BookOpen },
+  { title: "Team", segment: "/team", icon: UserCog },
+  { title: "Settings", segment: "/settings", icon: Settings },
 ];

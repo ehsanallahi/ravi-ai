@@ -109,3 +109,36 @@ columns needs explicit approval and a backup.
 
 Message bodies and media metadata are personal data. A per-tenant retention policy, plus export and
 delete tooling for data-subject requests, is tracked for Phase 4.
+
+## Phase 2 additions (migration `20261017000000_auth_tenancy`)
+
+Additive only: new tables and new nullable or defaulted columns. Nothing is dropped, renamed or
+retyped. It was reviewed with a destructive-statement scan before being applied to the local dev
+database, and a read-only `migrate diff` confirms there is no drift.
+
+| Change                                                                    | Purpose                                                            |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `User.emailVerified`, `User.image`, `User.twoFactorEnabled`               | Better Auth user fields                                            |
+| `Session` (unique `token`, `expiresAt`, IP, user agent)                   | Database-backed sessions; deleted on sign-out                      |
+| `Account` (`providerId = "credential"`, `password` = scrypt hash)         | Email/password credentials                                         |
+| `Verification`                                                            | Email-verification and password-reset tokens (expire after 1 hour) |
+| `TwoFactor` (encrypted `secret` and `backupCodes`, lockout counters)      | TOTP                                                               |
+| `RateLimit` (`key`, `count`, `lastRequest` BigInt)                        | Database-backed rate limiting across replicas                      |
+| `Invitation` (`tokenHash` unique, `expiresAt`, `acceptedAt`, `revokedAt`) | Single-use, email-bound invitations                                |
+
+`User.passwordHash` and `User.emailVerifiedAt` from Phase 1 are **deprecated but kept**, to avoid a
+destructive migration. Dropping them later needs explicit approval.
+
+Auth tables reference `User` with `ON DELETE CASCADE`, so sessions and credentials disappear with
+their user. Users are never deleted by the app; tenant tables keep `RESTRICT`.
+
+### Local databases
+
+`pnpm db:local` runs PostgreSQL 18 from the `embedded-postgres` npm binaries on `127.0.0.1:54329`,
+with data in `.data/postgres` (git-ignored). It provides two databases:
+
+- `ravi_ai_dev` for development (`DATABASE_URL`).
+- `ravi_ai_test` for manual testing. Automated integration tests use their own throwaway cluster.
+
+The test guard (`assertSafeTestDatabaseUrl`) refuses any truncation, fixture or migration step
+unless the host is local **and** the database name ends in `_test`.

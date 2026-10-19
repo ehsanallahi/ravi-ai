@@ -5,12 +5,15 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "./nav-items";
 
-export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarNav({ orgSlug, onNavigate }: { orgSlug: string; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const base = `/o/${orgSlug}`;
   return (
     <nav aria-label="Main" className="flex flex-col gap-1 px-3">
-      {NAV_ITEMS.map(({ title, href, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
+      {NAV_ITEMS.map(({ title, segment, icon: Icon }) => {
+        const href = `${base}${segment}`;
+        const active =
+          segment === "" ? pathname === base : pathname === href || pathname.startsWith(`${href}/`);
         return (
           <Link
             key={href}
