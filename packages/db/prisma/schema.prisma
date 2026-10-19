@@ -100,6 +100,11 @@ model Organization {
   slug               String   @unique
   timezone           String   @default("UTC")
   aiAutoReplyEnabled Boolean  @default(false)
+  /// Explicit opt-in (by an Owner) before any data is sent to a third-party AI provider.
+  aiDataConsentAt       DateTime?
+  aiDataConsentByUserId String?
+  /// Monthly AI spend cap in USD; capped by the platform AI_MONTHLY_BUDGET_USD. Null = platform default.
+  aiMonthlyBudgetUsd    Decimal?  @db.Decimal(10, 2)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -113,6 +118,9 @@ model Organization {
   knowledgeChunks    KnowledgeChunk[]
   auditLogs          AuditLog[]
   invitations        Invitation[]
+  aiUsageEvents      AiUsageEvent[]
+  aiSuggestions      AiSuggestion[]
+  aiBudgetReservations AiBudgetReservation[]
 }
 
 model User {
@@ -383,6 +391,15 @@ model KnowledgeDocument {
   status          KnowledgeDocumentStatus @default(DRAFT)
   /// sha256 of content; detects re-uploads of identical documents.
   checksum        String?
+  /// Original upload filename (txt, md, pdf), when uploaded.
+  sourceFilename  String?
+  /// Incremented whenever the content changes; chunks are rebuilt per version.
+  version         Int                     @default(1)
+  indexedAt       DateTime?
+  /// Embedding model used for the current chunks (re-index when it changes).
+  embeddingModel  String?
+  /// Last indexing error (safe, non-sensitive summary).
+  errorMessage    String?
   createdByUserId String?
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
@@ -401,6 +418,10 @@ model KnowledgeChunk {
   index          Int
   content        String   @db.Text
   tokenEstimate  Int
+  /// pgvector embedding. Dimension is fixed by this column (768); changing it needs a migration
+  /// and a re-index. GEMINI_EMBEDDING_DIMENSIONS is validated against it at startup.
+  embedding      Unsupported("vector(768)")?
+  embeddingModel String?
   createdAt      DateTime @default(now())
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -408,6 +429,101 @@ model KnowledgeChunk {
 
   @@unique([documentId, index])
   @@index([organizationId])
+}
+
+enum AiOperation {
+  CHAT
+  EMBEDDING
+}
+
+enum AiFeature {
+  PLAYGROUND
+  KNOWLEDGE_INDEXING
+  AUTO_REPLY
+}
+
+enum AiSuggestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AiSuggestionDecision {
+  REPLY
+  HANDOFF
+}
+
+/// One AI provider call, for usage limits, cost tracking and error monitoring. No prompt text.
+model AiUsageEvent {
+  id                  String      @id @default(cuid())
+  organizationId      String
+  userId              String?
+  feature             AiFeature
+  operation           AiOperation
+  provider            String
+  model               String
+  inputTokens         Int         @default(0)
+  outputTokens        Int         @default(0)
+  thinkingTokens      Int         @default(0)
+  embeddingDimensions Int?
+  estimatedCostUsd    Decimal     @default(0) @db.Decimal(12, 6)
+  latencyMs           Int         @default(0)
+  success             Boolean
+  /// Short code only (e.g. "http_429"); never message text that could echo input.
+  errorCode           String?
+  createdAt           DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+}
+
+/// Budget held for an AI call in progress, so concurrent requests cannot overspend. Created under
+/// a per-organization advisory lock and released when the call finishes (the AiUsageEvent then
+/// records the actual cost). Unreleased reservations expire after 15 minutes.
+model AiBudgetReservation {
+  id             String    @id @default(cuid())
+  organizationId String
+  amountUsd      Decimal   @db.Decimal(12, 6)
+  feature        AiFeature
+  createdAt      DateTime  @default(now())
+  releasedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, releasedAt, createdAt])
+}
+
+/// An AI-generated answer for review. Suggestions are never sent to WhatsApp from Phase 3 code.
+model AiSuggestion {
+  id               String               @id @default(cuid())
+  organizationId   String
+  createdByUserId  String?
+  /// "playground" now; "conversation" when draft mode for real chats is approved.
+  source           String               @default("playground")
+  conversationId   String?
+  question         String               @db.Text
+  decision         AiSuggestionDecision
+  answer           String?              @db.Text
+  handoffReason    String?
+  /// A model draft that failed safety checks (reviewers only).
+  withheldDraft    String?              @db.Text
+  language         String?
+  model            String?
+  /// Retrieved knowledge: [{ chunkId, documentId, documentTitle, excerpt, score, similarity, cited }]
+  sources          Json
+  estimatedCostUsd Decimal              @default(0) @db.Decimal(12, 6)
+  latencyMs        Int                  @default(0)
+  status           AiSuggestionStatus   @default(PENDING)
+  rating           Int?
+  reviewNotes      String?              @db.Text
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime             @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
 }
 
 /// Durable job queue (see docs/ARCHITECTURE.md §4). Handlers must be idempotent.

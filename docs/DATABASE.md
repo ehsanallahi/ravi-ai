@@ -142,3 +142,28 @@ with data in `.data/postgres` (git-ignored). It provides two databases:
 
 The test guard (`assertSafeTestDatabaseUrl`) refuses any truncation, fixture or migration step
 unless the host is local **and** the database name ends in `_test`.
+
+## Phase 3 additions (migration `20261019000000_ai_knowledge_rag`)
+
+Additive only. It was checked by the destructive-statement guard, applied to the local dev
+database, and a drift check shows none.
+
+| Change                                                                                       | Purpose                                                                                            |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `CREATE EXTENSION IF NOT EXISTS vector`                                                      | pgvector (the server must provide it)                                                              |
+| `KnowledgeChunk.embedding vector(768)`, `embeddingModel`                                     | Gemini embeddings; the dimension is fixed by the column                                            |
+| `KnowledgeDocument.version`, `indexedAt`, `embeddingModel`, `errorMessage`, `sourceFilename` | Indexing state                                                                                     |
+| `Organization.aiDataConsentAt`, `aiDataConsentByUserId`                                      | Owner opt-in before data goes to the AI provider                                                   |
+| `Organization.aiMonthlyBudgetUsd`                                                            | Per-organization cap, never above the platform cap                                                 |
+| `AiUsageEvent`                                                                               | One row per provider call: model, tokens, dimensions, estimated cost, latency, success, error code |
+| `AiBudgetReservation`                                                                        | In-flight cost reservations so parallel requests cannot overspend; released after each call        |
+| `AiSuggestion`                                                                               | Playground answers with sources, decision, cost and review (status, rating, notes)                 |
+
+- **Chunks are derived data.** Re-indexing replaces only that document's chunks, in one
+  transaction, after every embedding succeeded. Documents are archived, never deleted.
+- **UTF-8 is required.** Windows' `initdb` defaults to WIN1252, which cannot store Urdu. Local
+  clusters are created with `--encoding=UTF8`, and test setup refuses non-UTF-8 databases. An older
+  local cluster in `.data/postgres` (WIN1252) is left untouched and can be deleted manually; new
+  local data lives in `.data/pg-utf8`.
+- **No ANN index yet.** Retrieval uses exact cosine search per organization, which is fast for
+  typical knowledge bases. An HNSW index will be added in a reviewed migration when needed.

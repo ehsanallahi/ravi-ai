@@ -57,3 +57,26 @@ integration tests against PostgreSQL, gitleaks and `pnpm audit`.
 - Destructive-migration guard (`DROP`, `TRUNCATE`, `RENAME`, column type changes) fails the build.
 - CI uses no repository secrets: a disposable PostgreSQL container with a CI-only password, and
   synthetic fixtures.
+
+## Phase 3: AI and knowledge base (Gemini)
+
+| Control                     | Implementation                                                                                                            | Verified by                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| API key stays on the server | Read from the server environment only; no `NEXT_PUBLIC_` variable; never logged or rendered; used only in server code     | Code review; no client import of `@ravi/knowledge` |
+| Explicit opt-in             | Owner-only `aiDataConsentAt`; every AI call checks it first; revoking stops calls immediately                             | Integration tests                                  |
+| Usage limits                | Per-organization monthly USD budget (≤ platform cap) and hourly request cap; unknown model prices are refused             | Integration tests                                  |
+| Concurrent budget safety    | Per-organization advisory lock; an upper-bound cost is reserved before each call and released after it                    | Integration test (parallel requests)               |
+| Provider failures           | 30 s timeout; retries only on 408/429/5xx with backoff; failures recorded as codes and shown as a handoff or a retry hint | Unit and SDK contract tests                        |
+| Unsafe documents            | Card numbers (Luhn) and credentials are refused at ingest; national IDs and instruction-like text produce a warning       | Unit and integration tests                         |
+| Tenant isolation            | Chunk **and** document filtered by `organizationId` in SQL; other tenants' document and suggestion IDs return not-found   | Integration tests (manipulated IDs)                |
+| Hallucination controls      | Grounded prompt; no knowledge → no model call; exact-number and URL check; refusals and invalid output → handoff          | Unit and integration tests                         |
+| Prompt injection            | Sources delimited as data; customer text only in user turns; structured output; injection case in `ai:eval`               | Unit tests; eval script                            |
+| No WhatsApp side effects    | Playground and review create no jobs or outbound messages; auto-reply stays disabled                                      | Integration tests                                  |
+| Logging hygiene             | `AiUsageEvent` stores codes such as `http_429`, never prompt, document or error-message text                              | Integration test                                   |
+| Upload safety               | ≤ 5 MB; type by signature; server-side extraction (≤ 200 PDF pages, 20 s, no fonts or XFA); control characters stripped   | Unit tests                                         |
+| Data use                    | Free-tier Gemini data may be used by Google to improve products, so the docs and UI require a paid tier for business data | Documentation; consent text                        |
+
+Residual risks: the grounding check covers numbers and links but not every factual claim (wording
+about policies can still be wrong; see `docs/PHASE_3_VERIFICATION.md`), which is why review in draft mode is required before any
+automatic replies. Retrieval quality depends on `AI_RETRIEVAL_MIN_SIMILARITY`, so tune it with
+`pnpm ai:eval`.

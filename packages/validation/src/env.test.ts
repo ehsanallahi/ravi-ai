@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiEnvSchema,
   authEnvSchema,
+  isAiConfigured,
   EnvValidationError,
   parseEnv,
   webhookEnvSchema,
@@ -36,7 +38,8 @@ describe("env validation", () => {
   it("applies safe worker defaults (AI off)", () => {
     const env = parseEnv(workerEnvSchema, { DATABASE_URL: db });
     expect(env.AI_AUTO_REPLY_ENABLED).toBe(false);
-    expect(env.AI_PROVIDER).toBe("disabled");
+    expect(env.AI_PROVIDER).toBe("gemini");
+    expect(isAiConfigured(env)).toBe(false); // no key → AI never called
     expect(env.WHATSAPP_GRAPH_API_VERSION).toMatch(/^v\d+\.\d+$/);
   });
 
@@ -77,5 +80,40 @@ describe("env validation", () => {
     expect(() =>
       parseEnv(workerEnvSchema, { DATABASE_URL: db, AI_AUTO_REPLY_ENABLED: "true" }),
     ).toThrow(/AI_PROVIDER[\s\S]*ENCRYPTION_KEY/);
+  });
+
+  it("parses Gemini AI settings with safe defaults; empty .env values fall back", () => {
+    const env = parseEnv(aiEnvSchema, {
+      GEMINI_API_KEY: "",
+      GEMINI_CHAT_MODEL: "",
+      GEMINI_EMBEDDING_MODEL: "",
+      GEMINI_EMBEDDING_DIMENSIONS: "768",
+      AI_AUTO_REPLY_ENABLED: "false",
+      AI_MONTHLY_BUDGET_USD: "25",
+    });
+    expect(env).toMatchObject({
+      AI_PROVIDER: "gemini",
+      GEMINI_CHAT_MODEL: "gemini-3.1-flash-lite",
+      GEMINI_EMBEDDING_MODEL: "gemini-embedding-2",
+      GEMINI_EMBEDDING_DIMENSIONS: 768,
+      GEMINI_THINKING_LEVEL: "minimal",
+      AI_AUTO_REPLY_ENABLED: false,
+      AI_MONTHLY_BUDGET_USD: 25,
+    });
+    expect(env.GEMINI_API_KEY).toBeUndefined();
+    expect(isAiConfigured(env)).toBe(false);
+    expect(isAiConfigured({ AI_PROVIDER: "gemini", GEMINI_API_KEY: "a-key-value-123" })).toBe(true);
+    expect(isAiConfigured({ AI_PROVIDER: "disabled", GEMINI_API_KEY: "a-key-value-123" })).toBe(
+      false,
+    );
+  });
+
+  it("rejects unsupported embedding dimensions and bad model IDs", () => {
+    expect(() => parseEnv(aiEnvSchema, { GEMINI_EMBEDDING_DIMENSIONS: "64" })).toThrow(
+      /GEMINI_EMBEDDING_DIMENSIONS/,
+    );
+    expect(() => parseEnv(aiEnvSchema, { GEMINI_CHAT_MODEL: "../../etc" })).toThrow(
+      /GEMINI_CHAT_MODEL/,
+    );
   });
 });

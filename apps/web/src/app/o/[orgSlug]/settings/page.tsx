@@ -17,6 +17,9 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { listWhatsAppAccounts } from "@/server/data/whatsapp";
 import { getOrganizationSettings, listAuditLog } from "@/server/services/organizations";
 import { requireTenant } from "@/server/tenancy/next";
+import { getAiRuntime } from "@/server/ai/runtime";
+import { getAiStatus } from "@/server/data/ai";
+import { AiBudgetForm, AiConsentForm } from "./ai-settings";
 import { SettingsForm } from "./settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -33,10 +36,11 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
     );
   }
 
-  const [org, accounts, audit] = await Promise.all([
+  const [org, accounts, audit, aiStatus] = await Promise.all([
     getOrganizationSettings(ctx),
     listWhatsAppAccounts(ctx),
     can(ctx.role, "audit:read") ? listAuditLog(ctx, 25) : Promise.resolve([]),
+    getAiStatus(ctx, getAiRuntime().runtime),
   ]);
 
   return (
@@ -108,14 +112,42 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
 
       <Card>
         <CardHeader>
-          <CardTitle>AI assistant</CardTitle>
+          <CardTitle>AI assistant (Google Gemini)</CardTitle>
           <CardDescription>
-            AI replies are turned off for every organization in this phase. They need the platform
-            switch, a configured provider and a reviewed knowledge base.
+            {aiStatus.models
+              ? `${aiStatus.models.chat} · ${aiStatus.models.embedding} (${aiStatus.models.dimensions} dimensions)`
+              : "AI is not configured on this server."}{" "}
+            Automatic WhatsApp replies: off.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Badge variant="outline">Off</Badge>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">
+              Data processing consent:{" "}
+              {aiStatus.usage.consentAt
+                ? `enabled ${formatDateTime(aiStatus.usage.consentAt)}`
+                : "not given"}
+            </p>
+            {can(ctx.role, "org:manage") ? (
+              <AiConsentForm orgSlug={orgSlug} granted={Boolean(aiStatus.usage.consentAt)} />
+            ) : (
+              <p className="text-sm text-muted-foreground">Only an owner can change this.</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium">
+              Usage this month: ${aiStatus.usage.monthToDateUsd.toFixed(4)} of $
+              {aiStatus.usage.budgetUsd.toFixed(2)} · {aiStatus.usage.requestsLastHour}/
+              {aiStatus.usage.requestsPerHour} requests in the last hour
+            </p>
+            {can(ctx.role, "org:manage") ? (
+              <AiBudgetForm
+                orgSlug={orgSlug}
+                orgBudget={aiStatus.orgBudgetUsd}
+                platformBudget={aiStatus.platformBudgetUsd}
+              />
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

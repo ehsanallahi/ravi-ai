@@ -1,6 +1,13 @@
 import { type ChatMessage, generateGroundedReply, isRetryableProviderError } from "@ravi/ai-engine";
 import { errorMessage } from "@ravi/core";
 import {
+  AiGuardError,
+  estimateAssistantCostUsd,
+  PgHybridRetriever,
+  withAiBudget,
+  withUsageRecording,
+} from "@ravi/knowledge";
+import {
   isWithinServiceWindow,
   JOB_TYPES,
   type JobHandler,
@@ -63,16 +70,36 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     content: m.body ?? "",
   }));
 
+  const recorded = withUsageRecording(
+    ctx.prisma,
+    { chat: ctx.ai.chat, embeddings: ctx.ai.embeddings },
+    { organizationId: organization.id, feature: "AUTO_REPLY" },
+    ctx.ai.prices,
+  );
+
   let decision;
   try {
-    decision = await generateGroundedReply({
-      provider: ctx.provider,
-      retriever: ctx.retriever,
-      organizationId: organization.id,
-      businessName: organization.name,
-      history,
-    });
+    // Same gates as the dashboard, concurrency-safe: consent, budget (incl. in-flight calls),
+    // hourly cap; an upper-bound cost is reserved for the duration of the call.
+    decision = await withAiBudget(
+      ctx.prisma,
+      organization.id,
+      ctx.ai,
+      { amountUsd: estimateAssistantCostUsd(ctx.ai), feature: "AUTO_REPLY" },
+      () =>
+        generateGroundedReply({
+          provider: recorded.chat,
+          retriever: new PgHybridRetriever(ctx.prisma, recorded.embeddings, ctx.ai.retrieval),
+          organizationId: organization.id,
+          businessName: organization.name,
+          history,
+        }),
+    );
   } catch (err) {
+    if (err instanceof AiGuardError) {
+      log.info("ai reply skipped: guard", { reason: err.reason });
+      return;
+    }
     if (!isRetryableProviderError(err)) throw new NonRetryableError(errorMessage(err));
     throw err;
   }
@@ -98,7 +125,8 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
         status: "PENDING",
         metadata: {
           model: decision.model,
-          sourceChunkIds: decision.sourceChunkIds,
+          sourceChunkIds: decision.sources.filter((s) => s.cited).map((s) => s.chunkId),
+          language: decision.language,
           inReplyTo: inbound.id,
         },
       },

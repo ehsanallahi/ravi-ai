@@ -10,7 +10,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.integration.config.ts",
-    "owner:create": "tsx --env-file-if-exists=../../.env scripts/create-owner.ts"
+    "owner:create": "tsx --env-file-if-exists=../../.env scripts/create-owner.ts",
+    "ai:kb-test": "tsx --env-file-if-exists=../../.env scripts/kb-integration.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.3.1",
@@ -34,7 +35,9 @@
     "resend": "^6.34.1",
     "server-only": "^0.0.1",
     "tailwind-merge": "^3.7.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "@ravi/knowledge": "workspace:*",
+    "@ravi/ai-engine": "workspace:*"
   },
   "devDependencies": {
     "@next/env": "16.4.2",

@@ -1,4 +1,5 @@
-import { DisabledProvider, InMemoryRetriever } from "@ravi/ai-engine";
+import { createAiRuntime } from "@ravi/knowledge";
+import { aiEnvSchema } from "@ravi/validation";
 import { createLogger } from "@ravi/core";
 import type { Job, PrismaClient } from "@ravi/db";
 import type { WorkerEnv } from "@ravi/validation";
@@ -17,8 +18,8 @@ const ctx: WorkerContext = {
   prisma: {} as PrismaClient,
   env: { AI_AUTO_REPLY_ENABLED: false } as WorkerEnv,
   log: createLogger({}, "error"),
-  provider: new DisabledProvider(),
-  retriever: new InMemoryRetriever(new Map()),
+  // No API key: AI is not configured, and auto-replies stay disabled.
+  ai: createAiRuntime(aiEnvSchema.parse({})),
   encryptionKey: null,
   now: () => new Date("2026-01-01T00:00:00Z"),
 };

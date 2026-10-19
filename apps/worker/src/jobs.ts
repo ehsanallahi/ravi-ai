@@ -1,4 +1,4 @@
-import type { LLMProvider, Retriever } from "@ravi/ai-engine";
+import type { AiRuntime } from "@ravi/knowledge";
 import type { Logger } from "@ravi/core";
 import type { Job, PrismaClient } from "@ravi/db";
 import type { WorkerEnv } from "@ravi/validation";
@@ -9,8 +9,8 @@ export interface WorkerContext {
   prisma: PrismaClient;
   env: WorkerEnv;
   log: Logger;
-  provider: LLMProvider;
-  retriever: Retriever;
+  /** AI providers, limits and prices. Auto-replies additionally need AI_AUTO_REPLY_ENABLED. */
+  ai: AiRuntime;
   encryptionKey: Buffer | null;
   now: () => Date;
 }

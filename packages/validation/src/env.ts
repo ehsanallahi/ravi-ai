@@ -89,6 +89,72 @@ export const authEnvSchema = z
   });
 export type AuthEnv = z.infer<typeof authEnvSchema>;
 
+/** Treats empty strings from .env files ("KEY=") as unset, so defaults apply. */
+const emptyAsUndefined = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+const modelId = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9.-]*$/, "Expected a model ID like gemini-3.1-flash-lite");
+const optionalPrice = z.preprocess(emptyAsUndefined, z.coerce.number().min(0).max(1000).optional());
+
+/**
+ * AI configuration shared by apps/web and apps/worker. Gemini is the only implemented provider;
+ * without GEMINI_API_KEY, AI features report "not configured" and never call out.
+ */
+export const aiEnvShape = {
+  AI_PROVIDER: z.preprocess(emptyAsUndefined, z.enum(["disabled", "gemini"]).default("gemini")),
+  /** Server-side only. Never exposed to the browser (no NEXT_PUBLIC_ prefix). */
+  GEMINI_API_KEY: z.preprocess(emptyAsUndefined, z.string().min(10).optional()),
+  GEMINI_CHAT_MODEL: z.preprocess(emptyAsUndefined, modelId.default("gemini-3.1-flash-lite")),
+  GEMINI_EMBEDDING_MODEL: z.preprocess(emptyAsUndefined, modelId.default("gemini-embedding-2")),
+  GEMINI_EMBEDDING_DIMENSIONS: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(128).max(3072).default(768),
+  ),
+  /** Gemini 3.x reasoning depth; "minimal" is the fastest and cheapest. */
+  GEMINI_THINKING_LEVEL: z.preprocess(
+    emptyAsUndefined,
+    z.enum(["minimal", "low", "medium", "high"]).default("minimal"),
+  ),
+  /** Per-organization monthly AI spend cap (USD). Organizations may set a lower cap. */
+  AI_MONTHLY_BUDGET_USD: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().min(0).max(10_000).default(25),
+  ),
+  /** Per-organization AI request cap per hour (all features). */
+  AI_ORG_REQUESTS_PER_HOUR: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(1).max(100_000).default(200),
+  ),
+  AI_AUTO_REPLY_ENABLED: booleanFromString,
+  /** Per-attempt timeout for Gemini requests (ms). */
+  GEMINI_TIMEOUT_MS: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(1000).max(120_000).default(30_000),
+  ),
+  /** Attempts per Gemini request, including the first (retries only on 408/429/5xx). */
+  GEMINI_MAX_ATTEMPTS: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(1).max(5).default(3),
+  ),
+  /** Minimum cosine similarity for a knowledge chunk to count as relevant (tune with pnpm ai:eval). */
+  AI_RETRIEVAL_MIN_SIMILARITY: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().min(0).max(1).default(0.55),
+  ),
+  /** Price overrides (USD per 1M tokens) for models missing from the built-in price table. */
+  GEMINI_CHAT_PRICE_INPUT_PER_MTOK: optionalPrice,
+  GEMINI_CHAT_PRICE_OUTPUT_PER_MTOK: optionalPrice,
+  GEMINI_EMBEDDING_PRICE_PER_MTOK: optionalPrice,
+};
+
+export const aiEnvSchema = z.object(aiEnvShape);
+export type AiEnv = z.infer<typeof aiEnvSchema>;
+
+/** True when AI calls can be made (provider enabled and a key present). */
+export function isAiConfigured(env: Pick<AiEnv, "AI_PROVIDER" | "GEMINI_API_KEY">): boolean {
+  return env.AI_PROVIDER === "gemini" && Boolean(env.GEMINI_API_KEY);
+}
+
 /** Environment for apps/worker. */
 export const workerEnvSchema = z
   .object({
@@ -98,10 +164,7 @@ export const workerEnvSchema = z
       .regex(/^v\d+\.\d+$/, "Expected a Graph API version like v24.0")
       .default("v24.0"),
     ENCRYPTION_KEY: z.string().optional(),
-    AI_PROVIDER: z.enum(["disabled", "anthropic"]).default("disabled"),
-    AI_MODEL: z.string().min(1).default("claude-opus-5-5"),
-    AI_AUTO_REPLY_ENABLED: booleanFromString,
-    ANTHROPIC_API_KEY: z.string().optional(),
+    ...aiEnvShape,
     WORKER_ID: z.string().optional(),
     WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(1000),
     WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(10),
@@ -112,11 +175,11 @@ export const workerEnvSchema = z
       .default(5 * 60_000),
   })
   .superRefine((env, ctx) => {
-    if (env.AI_AUTO_REPLY_ENABLED && env.AI_PROVIDER === "disabled") {
+    if (env.AI_AUTO_REPLY_ENABLED && !isAiConfigured(env)) {
       ctx.addIssue({
         code: "custom",
         path: ["AI_PROVIDER"],
-        message: "AI_AUTO_REPLY_ENABLED=true requires AI_PROVIDER to be set",
+        message: "AI_AUTO_REPLY_ENABLED=true requires AI_PROVIDER=gemini and GEMINI_API_KEY",
       });
     }
     if (env.AI_AUTO_REPLY_ENABLED && !env.ENCRYPTION_KEY) {

@@ -9,6 +9,8 @@ import {
   randomPassword,
   startCluster,
 } from "./postgres";
+import { assertUtf8Database } from "./encoding";
+import { ensurePgvectorInstalled } from "./pgvector";
 import { assertSafeTestDatabaseUrl } from "./safety";
 
 declare module "vitest" {
@@ -32,6 +34,7 @@ export default async function setup(project: TestProject) {
   let url = process.env.TEST_DATABASE_URL;
 
   if (!url) {
+    ensurePgvectorInstalled();
     tempDir = mkdtempSync(path.join(tmpdir(), "ravi-ai-pg-"));
     cluster = await startCluster({
       databaseDir: path.join(tempDir, "data"),
@@ -45,6 +48,7 @@ export default async function setup(project: TestProject) {
   }
 
   assertSafeTestDatabaseUrl(url);
+  await assertUtf8Database(url);
   migrateDeploy(url);
   project.provide("testDatabaseUrl", url);
 

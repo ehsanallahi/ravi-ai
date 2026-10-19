@@ -10,9 +10,14 @@ export interface Retriever {
 }
 
 const STOPWORDS = new Set(
-  "a an and are as at be but by can do does for from have how i in is it me my of on or our please so that the this to was we what when where which who why will with you your".split(
-    " ",
-  ),
+  [
+    // English
+    "a an and are as at be but by can do does for from have how i in is it me my of on or our please so that the this to was we what when where which who why will with you your",
+    // Roman Urdu function words
+    "aap ap hai hain ho kya kia ka ki ke ko se mein main me ye yeh wo woh hum ham bhi aur ya to tou na nahi nahin raha rahi rahe tha thi the",
+  ]
+    .join(" ")
+    .split(" "),
 );
 
 export function tokenize(text: string): string[] {

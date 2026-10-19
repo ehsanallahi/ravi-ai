@@ -46,6 +46,12 @@ export async function checkDatabaseHealth(
   }
 }
 
+/**
+ * Dimension of KnowledgeChunk.embedding (pgvector column type vector(768)). Changing it requires
+ * a migration and a re-index; configuration is validated against this value.
+ */
+export const KNOWLEDGE_EMBEDDING_DIMENSIONS = 768;
+
 /** Prisma error code for unique constraint violations. */
 export const UNIQUE_VIOLATION = "P2002";
 

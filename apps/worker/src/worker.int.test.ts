@@ -1,4 +1,5 @@
-import { DisabledProvider, InMemoryRetriever } from "@ravi/ai-engine";
+import { createAiRuntime } from "@ravi/knowledge";
+import { aiEnvSchema } from "@ravi/validation";
 import { createLogger, JOB_TYPES } from "@ravi/core";
 import { type Job, prisma } from "@ravi/db";
 import { createTenantFixture, resetTestDatabase, type TenantFixture } from "@ravi/testing";
@@ -17,8 +18,8 @@ const ctx: WorkerContext = {
   // AI replies and live sending stay disabled.
   env: { AI_AUTO_REPLY_ENABLED: false, WHATSAPP_GRAPH_API_VERSION: "v24.0" } as WorkerEnv,
   log: createLogger({}, "error"),
-  provider: new DisabledProvider(),
-  retriever: new InMemoryRetriever(new Map()),
+  // No API key: AI is not configured, and auto-replies stay disabled.
+  ai: createAiRuntime(aiEnvSchema.parse({})),
   encryptionKey: null,
   now: () => new Date(),
 };

@@ -29,8 +29,19 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ["@ravi/core", "@ravi/db", "@ravi/validation", "@ravi/whatsapp"],
-  serverExternalPackages: ["@prisma/client"],
+  transpilePackages: [
+    "@ravi/ai-engine",
+    "@ravi/core",
+    "@ravi/db",
+    "@ravi/knowledge",
+    "@ravi/validation",
+    "@ravi/whatsapp",
+  ],
+  serverExternalPackages: ["@prisma/client", "unpdf"],
+  experimental: {
+    // Knowledge uploads are limited to 5 MB (validated again on the server).
+    serverActions: { bodySizeLimit: "6mb" },
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

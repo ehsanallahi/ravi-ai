@@ -16,7 +16,15 @@ export type AuditAction =
   | "contact.opted_out"
   | "contact.opted_in"
   | "lead.created"
-  | "lead.updated";
+  | "lead.updated"
+  | "knowledge.created"
+  | "knowledge.indexed"
+  | "knowledge.archived"
+  | "knowledge.restored"
+  | "ai.consent_granted"
+  | "ai.consent_revoked"
+  | "ai.budget_changed"
+  | "ai.suggestion_reviewed";
 
 export async function writeAudit(
   db: Prisma.TransactionClient,
