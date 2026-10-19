@@ -100,8 +100,11 @@ export function createAiRuntime(
   };
 }
 
-/** Upper bounds for one assistant answer (system prompt + up to 5 sources + question). */
-export const ASSISTANT_MAX_INPUT_TOKENS = 8_000;
+/**
+ * Upper bounds for one assistant answer: system prompt, up to 5 sources, the question and up to
+ * 10 earlier messages of context (Urdu script tokenises densely).
+ */
+export const ASSISTANT_MAX_INPUT_TOKENS = 10_000;
 export const ASSISTANT_MAX_OUTPUT_TOKENS = 1_024;
 export const ASSISTANT_MAX_THINKING_TOKENS = 1_024;
 
@@ -117,7 +120,8 @@ export function estimateAssistantCostUsd(runtime: AiRuntime): number {
     new Date(),
     runtime.prices,
   );
-  const query = estimateEmbeddingCostUsd(runtime.models.embedding, 600, runtime.prices);
+  // Up to two query embeddings: the question, and the question with the previous message.
+  const query = estimateEmbeddingCostUsd(runtime.models.embedding, 1_200, runtime.prices);
   return chat + query;
 }
 

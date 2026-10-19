@@ -1,6 +1,6 @@
 import { type ChatMessage, generateGroundedReply, isRetryableProviderError } from "@ravi/ai-engine";
 import { errorMessage } from "@ravi/core";
-import { Prisma } from "@ravi/db";
+import { isUniqueViolation, Prisma } from "@ravi/db";
 import {
   AiGuardError,
   estimateAssistantCostUsd,
@@ -18,7 +18,8 @@ import {
 } from "../jobs";
 import { enqueueJob } from "../queue";
 
-const HISTORY_LIMIT = 20;
+/** Earlier messages given to the model as context (never as questions to answer). */
+const CONTEXT_LIMIT = 10;
 
 export const handleAiReply: JobHandler = async (job, ctx) => {
   const messageId = messageIdFromPayload(job.payload);
@@ -56,10 +57,27 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     return;
   }
 
-  // Answer only the newest message: a newer inbound gets its own job, and a newer outbound
-  // means a human (or an earlier reply) already answered.
+  // One draft per inbound message: a retried or duplicated job finds the stored draft and stops.
+  if (mode === "draft") {
+    const existing = await ctx.prisma.aiSuggestion.findUnique({
+      where: { messageId: inbound.id },
+      select: { id: true },
+    });
+    if (existing) {
+      log.info("ai draft skipped: already drafted for this message");
+      return;
+    }
+  }
+
+  // A newer outbound message means a human (or an earlier reply) already answered. Automatic
+  // replies also skip when a newer inbound exists (it gets its own job); drafts do not, so every
+  // customer message gets its own draft even when messages arrive close together.
   const newer = await ctx.prisma.message.findFirst({
-    where: { conversationId: conversation.id, createdAt: { gt: inbound.createdAt } },
+    where: {
+      conversationId: conversation.id,
+      createdAt: { gt: inbound.createdAt },
+      ...(mode === "draft" ? { direction: "OUTBOUND" as const } : {}),
+    },
     select: { id: true },
   });
   if (newer) {
@@ -67,13 +85,21 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     return;
   }
 
-  const recent = await ctx.prisma.message.findMany({
-    where: { conversationId: conversation.id, body: { not: null } },
+  // Context: only messages of this tenant and conversation from BEFORE the triggering message,
+  // so a job that runs late or out of order never sees (or answers) later messages.
+  const earlier = await ctx.prisma.message.findMany({
+    where: {
+      organizationId: organization.id,
+      conversationId: conversation.id,
+      id: { not: inbound.id },
+      createdAt: { lt: inbound.createdAt },
+      body: { not: null },
+    },
     orderBy: { createdAt: "desc" },
-    take: HISTORY_LIMIT,
+    take: CONTEXT_LIMIT,
     select: { direction: true, body: true },
   });
-  const history: ChatMessage[] = recent.reverse().map((m) => ({
+  const context: ChatMessage[] = earlier.reverse().map((m) => ({
     role: m.direction === "INBOUND" ? "user" : "assistant",
     content: m.body ?? "",
   }));
@@ -102,7 +128,8 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
           retriever: new PgHybridRetriever(ctx.prisma, recorded.embeddings, ctx.ai.retrieval),
           organizationId: organization.id,
           businessName: organization.name,
-          history,
+          message: inbound.body ?? "",
+          context,
         }),
     );
   } catch (err) {
@@ -116,23 +143,33 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
 
   if (mode === "draft") {
     // Stored for review only: no outbound message, no send job, no conversation change.
-    await ctx.prisma.aiSuggestion.create({
-      data: {
-        organizationId: organization.id,
-        source: "conversation",
-        conversationId: conversation.id,
-        question: inbound.body ?? "",
-        decision: decision.kind === "reply" ? "REPLY" : "HANDOFF",
-        answer: decision.kind === "reply" ? decision.text : null,
-        handoffReason: decision.kind === "handoff" ? decision.reason : null,
-        withheldDraft: decision.kind === "handoff" ? (decision.withheldDraft ?? null) : null,
-        language: decision.language,
-        model: decision.generation?.model ?? null,
-        sources: decision.sources as unknown as Prisma.InputJsonValue,
-        estimatedCostUsd: new Prisma.Decimal(recorded.tally.costUsd.toFixed(6)),
-        latencyMs: Date.now() - started,
-      },
-    });
+    try {
+      await ctx.prisma.aiSuggestion.create({
+        data: {
+          organizationId: organization.id,
+          source: "conversation",
+          conversationId: conversation.id,
+          messageId: inbound.id,
+          question: inbound.body ?? "",
+          decision: decision.kind === "reply" ? "REPLY" : "HANDOFF",
+          answer: decision.kind === "reply" ? decision.text : null,
+          handoffReason: decision.kind === "handoff" ? decision.reason : null,
+          withheldDraft: decision.kind === "handoff" ? (decision.withheldDraft ?? null) : null,
+          language: decision.language,
+          model: decision.generation?.model ?? null,
+          sources: decision.sources as unknown as Prisma.InputJsonValue,
+          estimatedCostUsd: new Prisma.Decimal(recorded.tally.costUsd.toFixed(6)),
+          latencyMs: Date.now() - started,
+        },
+      });
+    } catch (err) {
+      // A concurrent run of the same job stored its draft first; keep that one.
+      if (isUniqueViolation(err)) {
+        log.info("ai draft skipped: already drafted for this message");
+        return;
+      }
+      throw err;
+    }
     log.info("ai draft stored for review (not sent)", { decision: decision.kind });
     return;
   }

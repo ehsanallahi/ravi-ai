@@ -441,7 +441,7 @@ describe("assistant (playground pipeline)", () => {
 
   it("is concurrency-safe: simultaneous questions cannot overspend the budget", async () => {
     const rt = runtime();
-    // One answer reserves ~$0.0051 (upper bound); a $0.01 budget fits exactly one in flight.
+    // One answer reserves ~$0.0056 (upper bound); a $0.01 budget fits exactly one in flight.
     expect(estimateAssistantCostUsd(rt)).toBeGreaterThan(0.005);
     expect(estimateAssistantCostUsd(rt)).toBeLessThan(0.01);
     await prisma.organization.update({

@@ -2,6 +2,7 @@ export * from "./types";
 export * from "./providers";
 export * from "./pricing";
 export * from "./grounding";
+export * from "./language";
 export * from "./rag/chunk";
 export * from "./rag/retriever";
 export * from "./rag/vector";

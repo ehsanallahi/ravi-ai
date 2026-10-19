@@ -22,6 +22,8 @@ const HANDOFF_TEXT: Record<string, string> = {
   model_handoff: "The AI decided a human should answer.",
   unsupported_claim:
     "The AI's draft contained a price, number or link that is not in your knowledge, so it was withheld.",
+  language_mismatch:
+    "The AI's draft was not in the customer's language or script (for example English instead of Roman Urdu), so it was withheld.",
   refused: "The AI provider declined to answer (safety filter).",
   invalid_model_output: "The AI returned an unusable answer.",
   empty_reply: "The AI returned an empty answer.",

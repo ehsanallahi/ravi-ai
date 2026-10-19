@@ -57,7 +57,7 @@ async function runAssistant(
     retriever: new PgHybridRetriever(prisma, recorded.embeddings, runtime.retrieval),
     organizationId: input.organizationId,
     businessName: input.businessName,
-    history: [{ role: "user", content: question }],
+    message: question,
   });
 
   const suggestion = await prisma.aiSuggestion.create({

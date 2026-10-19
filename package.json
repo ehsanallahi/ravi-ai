@@ -24,6 +24,7 @@
     "db:pgvector:setup": "pnpm --filter @ravi/testing db:pgvector:setup",
     "ai:check": "pnpm --filter @ravi/knowledge ai:check",
     "ai:eval": "pnpm --filter @ravi/knowledge ai:eval",
+    "ai:eval:drafts": "pnpm --filter @ravi/knowledge ai:eval:drafts",
     "ai:kb-test": "pnpm --filter @ravi/web ai:kb-test",
     "whatsapp:check": "pnpm --filter @ravi/worker whatsapp:check",
     "whatsapp:simulate": "pnpm --filter @ravi/web whatsapp:simulate"
