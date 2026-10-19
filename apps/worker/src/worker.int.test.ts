@@ -26,11 +26,22 @@ const ctx: WorkerContext = {
   now: () => new Date(),
 };
 
-function webhookFor(phoneNumberId: string, messageId: string, body = "Hello") {
+function webhookFor(
+  phoneNumberId: string,
+  messageId: string,
+  body = "Hello",
+  /** WhatsApp's send timestamp (unix seconds as a string, as Meta sends it). */
+  timestamp?: string,
+) {
   const payload = textMessagePayload({ messageId, body });
   payload.entry[0]!.changes[0]!.value.metadata.phone_number_id = phoneNumberId;
+  if (timestamp !== undefined)
+    payload.entry[0]!.changes[0]!.value.messages![0]!.timestamp = timestamp;
   return payload;
 }
+
+/** Unix seconds for "now minus `secondsAgo`", as WhatsApp sends it. */
+const sentAgo = (secondsAgo: number) => String(Math.floor(Date.now() / 1000) - secondsAgo);
 
 function asJob(payload: unknown): Job {
   return {
@@ -205,9 +216,15 @@ describe("AI draft mode (never sends)", () => {
   }
 
   /** Delivers one inbound message and returns it with its own draft job. */
-  async function deliver(c: WorkerContext, waMessageId: string, body: string, tenant = A) {
+  async function deliver(
+    c: WorkerContext,
+    waMessageId: string,
+    body: string,
+    tenant = A,
+    timestamp?: string,
+  ) {
     await handleWhatsAppWebhook(
-      asJob(webhookFor(tenant.whatsappAccount.phoneNumberId, waMessageId, body)),
+      asJob(webhookFor(tenant.whatsappAccount.phoneNumberId, waMessageId, body, timestamp)),
       c,
     );
     const message = await prisma.message.findFirstOrThrow({ where: { waMessageId } });
@@ -547,5 +564,108 @@ describe("AI draft mode (never sends)", () => {
     // The planted price is not accepted as evidence.
     const draft = await prisma.aiSuggestion.findFirstOrThrow();
     expect(draft).toMatchObject({ decision: "HANDOFF", handoffReason: "unsupported_claim" });
+  });
+
+  /** Maps each model request to its current message and the context lines it was given. */
+  function contextsByMessage(chat: ScriptedChatProvider): Map<string, string[]> {
+    return new Map(
+      chat.requests.map((r) => {
+        const turn = r.messages[0]!.content;
+        const lines = turn.split("\n").filter((l) => l.startsWith("Customer: "));
+        return [currentMessageOf(turn), lines.map((l) => l.slice("Customer: ".length))];
+      }),
+    );
+  }
+
+  it("orders context by WhatsApp send time when webhooks arrive out of order", async () => {
+    const { draftCtx, chat } = await setup({ minSimilarity: "0" });
+    for (let i = 0; i < 3; i++) chat.answer({ answer: "Delivery takes 2 days." });
+    // Sent first, second, third; delivered second, third, then first (a late retry).
+    const second = await deliver(draftCtx, "wamid.T2", "Second: Lahore delivery?", A, sentAgo(60));
+    const third = await deliver(draftCtx, "wamid.T3", "Third: Karachi delivery?", A, sentAgo(30));
+    const first = await deliver(draftCtx, "wamid.T1", "First: hello, delivery?", A, sentAgo(90));
+    for (const d of [second, third, first]) await handleAiReply(d.job, draftCtx);
+
+    const contexts = contextsByMessage(chat);
+    // The first message was stored last, yet its context has no (future) messages.
+    expect(contexts.get("First: hello, delivery?")).toEqual([]);
+    expect(contexts.get("Second: Lahore delivery?")).toEqual(["First: hello, delivery?"]);
+    expect(contexts.get("Third: Karachi delivery?")).toEqual([
+      "First: hello, delivery?",
+      "Second: Lahore delivery?",
+    ]);
+    const drafts = await prisma.aiSuggestion.findMany();
+    expect(drafts).toHaveLength(3);
+    for (const d of [first, second, third]) {
+      expect(drafts.find((x) => x.messageId === d.message.id)?.question).toBe(d.message.body);
+    }
+    // Existing records are read, never reordered or rewritten.
+    const stored = await prisma.message.findFirstOrThrow({ where: { id: first.message.id } });
+    expect(stored.createdAt).toEqual(first.message.createdAt);
+    expect(stored.waTimestamp).toEqual(first.message.waTimestamp);
+  });
+
+  it("orders simultaneous messages with the same timestamp deterministically, never both ways", async () => {
+    const { draftCtx, chat } = await setup({ minSimilarity: "0" });
+    for (let i = 0; i < 3; i++) chat.answer({ answer: "Delivery takes 2 days." });
+    const opener = await deliver(draftCtx, "wamid.S0", "Hi there", A, sentAgo(120));
+    const sameSecond = sentAgo(10);
+    // Two messages in the same second, ingested concurrently.
+    await Promise.all(
+      ["wamid.S1", "wamid.S2"].map((id) =>
+        handleWhatsAppWebhook(
+          asJob(webhookFor(A.whatsappAccount.phoneNumberId, id, `Question ${id}`, sameSecond)),
+          draftCtx,
+        ),
+      ),
+    );
+    const pair = await prisma.message.findMany({
+      where: { waMessageId: { in: ["wamid.S1", "wamid.S2"] } },
+    });
+    const jobs = await prisma.job.findMany({
+      where: { dedupeKey: { in: pair.map((m) => `ai-draft:${m.id}`) } },
+    });
+    await handleAiReply(opener.job, draftCtx);
+    await Promise.all(jobs.map((j) => handleAiReply({ ...j, attempts: 1 } as Job, draftCtx)));
+
+    const contexts = contextsByMessage(chat);
+    const [a, b] = pair.map((m) => m.body!);
+    const aSawB = contexts.get(a!)!.includes(b!);
+    const bSawA = contexts.get(b!)!.includes(a!);
+    expect(aSawB !== bSawA).toBe(true); // exactly one is "earlier"
+    // The earlier one is the one ingested first (then by id), as the tie-breaker defines.
+    const [earlier] = [...pair].sort(
+      (x, y) => x.createdAt.getTime() - y.createdAt.getTime() || (x.id < y.id ? -1 : 1),
+    );
+    const later = pair.find((m) => m.id !== earlier!.id)!;
+    expect(contexts.get(later.body!)).toEqual(["Hi there", earlier!.body]);
+    expect(contexts.get(earlier!.body!)).toEqual(["Hi there"]);
+    expect(await prisma.aiSuggestion.count()).toBe(3);
+    // Re-running both jobs creates nothing new.
+    await Promise.all(jobs.map((j) => handleAiReply({ ...j, attempts: 2 } as Job, draftCtx)));
+    expect(await prisma.aiSuggestion.count()).toBe(3);
+    expect(chat.requests).toHaveLength(3);
+  });
+
+  it("falls back to receipt order for missing, malformed or implausible timestamps", async () => {
+    const { draftCtx, chat } = await setup({ minSimilarity: "0" });
+    for (let i = 0; i < 3; i++) chat.answer({ answer: "Delivery takes 2 days." });
+    // A malformed timestamp falls back to the time of ingestion, read from Node's clock a few ms
+    // before the database row's receipt time; Windows clocks can differ by ~15 ms, so the
+    // deliveries are spaced to make "receipt order" unambiguous.
+    const gap = () => new Promise((r) => setTimeout(r, 50));
+    const future = await deliver(draftCtx, "wamid.F1", "Year 2100 clock?", A, "4102444800");
+    await gap();
+    const malformed = await deliver(draftCtx, "wamid.F2", "Malformed clock?", A, "abc");
+    await gap();
+    // A year old: beyond any webhook retry window, so not trusted either.
+    const stale = await deliver(draftCtx, "wamid.F3", "Year-old clock?", A, sentAgo(365 * 86400));
+    for (const d of [stale, malformed, future]) await handleAiReply(d.job, draftCtx);
+
+    const contexts = contextsByMessage(chat);
+    expect(contexts.get("Year 2100 clock?")).toEqual([]);
+    expect(contexts.get("Malformed clock?")).toEqual(["Year 2100 clock?"]);
+    expect(contexts.get("Year-old clock?")).toEqual(["Year 2100 clock?", "Malformed clock?"]);
+    expect(await prisma.aiSuggestion.count()).toBe(3);
   });
 });

@@ -16,10 +16,13 @@ import {
   messageIdFromPayload,
   NonRetryableError,
 } from "../jobs";
+import { compareMessages, orderTimeFilter } from "../message-order";
 import { enqueueJob } from "../queue";
 
 /** Earlier messages given to the model as context (never as questions to answer). */
 const CONTEXT_LIMIT = 10;
+/** Recent messages fetched before exact ordering; generous so late deliveries are included. */
+const ORDER_CANDIDATES = 50;
 
 export const handleAiReply: JobHandler = async (job, ctx) => {
   const messageId = messageIdFromPayload(job.payload);
@@ -72,34 +75,41 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
   // A newer outbound message means a human (or an earlier reply) already answered. Automatic
   // replies also skip when a newer inbound exists (it gets its own job); drafts do not, so every
   // customer message gets its own draft even when messages arrive close together.
-  const newer = await ctx.prisma.message.findFirst({
+  // Order is WhatsApp's send time (see message-order.ts), not insertion time: concurrent or late
+  // webhook deliveries can insert messages out of order.
+  const scope = {
+    organizationId: organization.id,
+    conversationId: conversation.id,
+    id: { not: inbound.id },
+  };
+  const later = await ctx.prisma.message.findMany({
     where: {
-      conversationId: conversation.id,
-      createdAt: { gt: inbound.createdAt },
+      ...scope,
+      ...orderTimeFilter(inbound, "after"),
       ...(mode === "draft" ? { direction: "OUTBOUND" as const } : {}),
     },
-    select: { id: true },
+    orderBy: { createdAt: "desc" },
+    take: ORDER_CANDIDATES,
+    select: { id: true, waTimestamp: true, createdAt: true },
   });
-  if (newer) {
+  if (later.some((m) => compareMessages(m, inbound) > 0)) {
     log.info("ai reply skipped: newer messages exist");
     return;
   }
 
-  // Context: only messages of this tenant and conversation from BEFORE the triggering message,
+  // Context: only messages of this tenant and conversation sent BEFORE the triggering message,
   // so a job that runs late or out of order never sees (or answers) later messages.
-  const earlier = await ctx.prisma.message.findMany({
-    where: {
-      organizationId: organization.id,
-      conversationId: conversation.id,
-      id: { not: inbound.id },
-      createdAt: { lt: inbound.createdAt },
-      body: { not: null },
-    },
+  const candidates = await ctx.prisma.message.findMany({
+    where: { ...scope, ...orderTimeFilter(inbound, "before"), body: { not: null } },
     orderBy: { createdAt: "desc" },
-    take: CONTEXT_LIMIT,
-    select: { direction: true, body: true },
+    take: ORDER_CANDIDATES,
+    select: { id: true, waTimestamp: true, createdAt: true, direction: true, body: true },
   });
-  const context: ChatMessage[] = earlier.reverse().map((m) => ({
+  const earlier = candidates
+    .filter((m) => compareMessages(m, inbound) < 0)
+    .sort(compareMessages)
+    .slice(-CONTEXT_LIMIT);
+  const context: ChatMessage[] = earlier.map((m) => ({
     role: m.direction === "INBOUND" ? "user" : "assistant",
     content: m.body ?? "",
   }));

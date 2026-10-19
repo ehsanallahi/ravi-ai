@@ -37,7 +37,9 @@ export interface NormalizeResult {
 
 function toDate(unixSeconds: string): Date {
   const n = Number(unixSeconds);
-  return Number.isFinite(n) && n > 0 ? new Date(n * 1000) : new Date();
+  // Huge values (e.g. "1e20") are finite but beyond the Date range: treat them as malformed too.
+  const date = Number.isFinite(n) && n > 0 ? new Date(n * 1000) : new Date(Number.NaN);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
 /** Best-effort human-readable text for a message, used for storage and AI context. */

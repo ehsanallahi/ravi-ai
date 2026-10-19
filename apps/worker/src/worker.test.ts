@@ -11,6 +11,7 @@ import {
   type WorkerContext,
 } from "./jobs";
 import { isOptOutRequest, shouldApplyStatus, toMessageStatus, toMessageType } from "./mappers";
+import { compareMessages, MAX_FUTURE_SKEW_MS, orderTime, orderTimeFilter } from "./message-order";
 import type { JobQueue } from "./queue";
 import { computeBackoffMs, runJob } from "./runner";
 
@@ -146,5 +147,63 @@ describe("job helpers", () => {
   it("validates message job payloads", () => {
     expect(messageIdFromPayload({ messageId: "m1" })).toBe("m1");
     expect(() => messageIdFromPayload({})).toThrow(NonRetryableError);
+  });
+});
+
+describe("message order", () => {
+  const at = (iso: string) => new Date(iso);
+  const msg = (id: string, wa: string | null, created: string) => ({
+    id,
+    waTimestamp: wa === null ? null : at(wa),
+    createdAt: at(created),
+  });
+
+  it("orders by WhatsApp send time, not insertion time (concurrent or late delivery)", () => {
+    // Sent 2nd but inserted 3rd, and sent 3rd but inserted 2nd (as seen in local testing).
+    const english = msg("m1", "2026-10-19T14:08:42Z", "2026-10-19T14:08:43.046Z");
+    const urdu = msg("m3", "2026-10-19T14:08:45Z", "2026-10-19T14:08:45.306Z");
+    const romanUrdu = msg("m2", "2026-10-19T14:08:43Z", "2026-10-19T14:08:45.339Z");
+    expect([urdu, romanUrdu, english].sort(compareMessages).map((m) => m.id)).toEqual([
+      "m1",
+      "m2",
+      "m3",
+    ]);
+  });
+
+  it("breaks equal timestamps by receipt time, then id, deterministically", () => {
+    const a = msg("b", "2026-10-19T10:00:00Z", "2026-10-19T10:00:01.000Z");
+    const b = msg("a", "2026-10-19T10:00:00Z", "2026-10-19T10:00:01.000Z");
+    const c = msg("c", "2026-10-19T10:00:00Z", "2026-10-19T10:00:00.500Z");
+    expect([a, b, c].sort(compareMessages).map((m) => m.id)).toEqual(["c", "a", "b"]);
+    expect(compareMessages(a, a)).toBe(0);
+  });
+
+  it("falls back to receipt time for missing, invalid or implausible timestamps", () => {
+    const created = "2026-10-19T10:00:00.000Z";
+    const t = at(created).getTime();
+    expect(orderTime(msg("x", null, created))).toBe(t);
+    expect(orderTime({ id: "x", waTimestamp: new Date(Number.NaN), createdAt: at(created) })).toBe(
+      t,
+    );
+    // Sent "in the future" beyond clock skew, or impossibly long ago.
+    expect(orderTime(msg("x", "2027-01-01T00:00:00Z", created))).toBe(t);
+    expect(orderTime(msg("x", "1970-01-02T00:00:00Z", created))).toBe(t);
+    // Within skew or a few days late: trusted.
+    const skewed = new Date(t + MAX_FUTURE_SKEW_MS - 1000).toISOString();
+    expect(orderTime(msg("x", skewed, created))).toBe(at(skewed).getTime());
+    expect(orderTime(msg("x", "2026-10-16T10:00:00Z", created))).toBe(
+      at("2026-10-16T10:00:00Z").getTime(),
+    );
+  });
+
+  it("prefilters on both timestamps so no earlier or later message is missed", () => {
+    const m = msg("x", "2026-10-19T10:00:00Z", "2026-10-19T10:00:05Z");
+    const t = at("2026-10-19T10:00:00Z");
+    expect(orderTimeFilter(m, "before")).toEqual({
+      OR: [{ waTimestamp: { lte: t } }, { createdAt: { lte: t } }],
+    });
+    expect(orderTimeFilter(m, "after")).toEqual({
+      OR: [{ waTimestamp: { gte: t } }, { createdAt: { gte: t } }],
+    });
   });
 });
