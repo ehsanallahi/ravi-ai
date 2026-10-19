@@ -108,7 +108,9 @@ Then:
    on synthetic English, Urdu and Roman Urdu cases (a few cents). Safety (unsafe or unsupported
    answers) is reported separately from quality.
 4. `pnpm ai:kb-test` runs an end-to-end knowledge-base check against the local dev database with
-   fictional data: it creates two new demo organizations and never changes existing records.
+   fictional data: it creates two new demo organizations and never changes existing records. It
+   needs `AI_PROVIDER=gemini` (for one run: `AI_PROVIDER=gemini pnpm ai:kb-test`). Results are in
+   `docs/PHASE_3_VERIFICATION.md`.
 5. In the app, an **owner** enables AI data processing under **Settings**. Admins then add
    documents under **Knowledge base**, index them, and test answers in the **AI playground**.
 

@@ -91,6 +91,11 @@ async function main() {
   const env = parseEnv(aiEnvSchema);
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
   const runtime = createAiRuntime(env);
+  if (!runtime.configured) {
+    throw new Error(
+      'AI is disabled (AI_PROVIDER is not "gemini"). For this run only: AI_PROVIDER=gemini pnpm ai:kb-test',
+    );
+  }
   console.log(
     `Models: chat ${runtime.models.chat} · embeddings ${runtime.models.embedding} (${runtime.models.dimensions})\n`,
   );
