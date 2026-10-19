@@ -440,6 +440,7 @@ enum AiFeature {
   PLAYGROUND
   KNOWLEDGE_INDEXING
   AUTO_REPLY
+  DRAFT_REPLY
 }
 
 enum AiSuggestionStatus {
@@ -499,7 +500,7 @@ model AiSuggestion {
   id               String               @id @default(cuid())
   organizationId   String
   createdByUserId  String?
-  /// "playground" now; "conversation" when draft mode for real chats is approved.
+  /// "playground" (AI playground) or "conversation" (draft for an inbound WhatsApp message; never sent).
   source           String               @default("playground")
   conversationId   String?
   question         String               @db.Text
@@ -524,6 +525,7 @@ model AiSuggestion {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, conversationId, createdAt])
 }
 
 /// Durable job queue (see docs/ARCHITECTURE.md §4). Handlers must be idempotent.

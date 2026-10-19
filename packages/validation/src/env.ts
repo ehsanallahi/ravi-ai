@@ -126,6 +126,11 @@ export const aiEnvShape = {
     z.coerce.number().int().min(1).max(100_000).default(200),
   ),
   AI_AUTO_REPLY_ENABLED: booleanFromString,
+  /**
+   * Draft mode: Gemini writes a suggested reply for each inbound WhatsApp text message and stores
+   * it for human review. Drafts are never sent. Still needs owner consent and budget.
+   */
+  AI_DRAFT_REPLIES_ENABLED: booleanFromString,
   /** Per-attempt timeout for Gemini requests (ms). */
   GEMINI_TIMEOUT_MS: z.preprocess(
     emptyAsUndefined,

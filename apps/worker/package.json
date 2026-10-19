@@ -9,7 +9,8 @@
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run -c vitest.integration.config.ts"
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "whatsapp:check": "tsx --env-file-if-exists=../../.env scripts/whatsapp-check.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",

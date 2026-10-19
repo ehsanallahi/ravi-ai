@@ -107,6 +107,26 @@ export async function listSuggestions(ctx: TenantContext, take = 20) {
       status: true,
       rating: true,
       language: true,
+      source: true,
+      createdAt: true,
+    },
+  });
+}
+
+/** AI drafts for one conversation (never sent). Visible to anyone who can read conversations. */
+export async function listConversationDrafts(ctx: TenantContext, conversationId: string, take = 5) {
+  assertPermission(ctx, "conversations:read");
+  return prisma.aiSuggestion.findMany({
+    where: { organizationId: ctx.organizationId, conversationId, source: "conversation" },
+    orderBy: { createdAt: "desc" },
+    take,
+    select: {
+      id: true,
+      question: true,
+      decision: true,
+      answer: true,
+      handoffReason: true,
+      status: true,
       createdAt: true,
     },
   });

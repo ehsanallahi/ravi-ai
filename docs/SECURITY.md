@@ -72,6 +72,9 @@ integration tests against PostgreSQL, gitleaks and `pnpm audit`.
 | Hallucination controls      | Grounded prompt; no knowledge → no model call; exact-number and URL check; refusals and invalid output → handoff          | Unit and integration tests                         |
 | Prompt injection            | Sources delimited as data; customer text only in user turns; structured output; injection case in `ai:eval`               | Unit tests; eval script                            |
 | No WhatsApp side effects    | Playground and review create no jobs or outbound messages; auto-reply stays disabled                                      | Integration tests                                  |
+| WhatsApp draft mode         | Drafts are stored as suggestions only: no outbound message, no send job, no conversation change; consent and budget apply | Worker integration tests                           |
+| Webhook signature           | HMAC-SHA256 over the exact raw bytes (not decoded text), constant-time comparison, 1 MB limit                             | Unit tests (Urdu text, invalid UTF-8 byte)         |
+| Connection diagnostic       | GET requests only; token sent in the Authorization header, never in URLs; token redacted from any output                  | Unit tests                                         |
 | Logging hygiene             | `AiUsageEvent` stores codes such as `http_429`, never prompt, document or error-message text                              | Integration test                                   |
 | Upload safety               | ≤ 5 MB; type by signature; server-side extraction (≤ 200 PDF pages, 20 s, no fonts or XFA); control characters stripped   | Unit tests                                         |
 | Data use                    | Free-tier Gemini data may be used by Google to improve products, so the docs and UI require a paid tier for business data | Documentation; consent text                        |

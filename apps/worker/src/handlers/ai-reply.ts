@@ -1,5 +1,6 @@
 import { type ChatMessage, generateGroundedReply, isRetryableProviderError } from "@ravi/ai-engine";
 import { errorMessage } from "@ravi/core";
+import { Prisma } from "@ravi/db";
 import {
   AiGuardError,
   estimateAssistantCostUsd,
@@ -8,6 +9,7 @@ import {
   withUsageRecording,
 } from "@ravi/knowledge";
 import {
+  aiReplyModeFromPayload,
   isWithinServiceWindow,
   JOB_TYPES,
   type JobHandler,
@@ -20,6 +22,7 @@ const HISTORY_LIMIT = 20;
 
 export const handleAiReply: JobHandler = async (job, ctx) => {
   const messageId = messageIdFromPayload(job.payload);
+  const mode = aiReplyModeFromPayload(job.payload);
   const inbound = await ctx.prisma.message.findUnique({
     where: { id: messageId },
     include: { conversation: { include: { contact: true, organization: true } } },
@@ -28,14 +31,18 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
 
   const { conversation } = inbound;
   const { contact, organization } = conversation;
-  const log = ctx.log.child({ organizationId: organization.id, conversationId: conversation.id });
+  const log = ctx.log.child({
+    organizationId: organization.id,
+    conversationId: conversation.id,
+    mode,
+  });
 
   // Guards: re-checked here because settings may change between enqueue and execution.
-  if (
-    !ctx.env.AI_AUTO_REPLY_ENABLED ||
-    !organization.aiAutoReplyEnabled ||
-    !conversation.aiEnabled
-  ) {
+  const enabled =
+    mode === "draft"
+      ? ctx.env.AI_DRAFT_REPLIES_ENABLED && conversation.aiEnabled
+      : ctx.env.AI_AUTO_REPLY_ENABLED && organization.aiAutoReplyEnabled && conversation.aiEnabled;
+  if (!enabled) {
     log.info("ai reply skipped: disabled");
     return;
   }
@@ -43,7 +50,8 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     log.info("ai reply skipped: contact opted out");
     return;
   }
-  if (!isWithinServiceWindow(contact.lastInboundAt, ctx.now())) {
+  // Drafts are never sent, so the 24-hour window only matters for automatic replies.
+  if (mode === "auto" && !isWithinServiceWindow(contact.lastInboundAt, ctx.now())) {
     log.info("ai reply skipped: outside 24h customer service window");
     return;
   }
@@ -70,10 +78,12 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     content: m.body ?? "",
   }));
 
+  const feature = mode === "draft" ? "DRAFT_REPLY" : "AUTO_REPLY";
+  const started = Date.now();
   const recorded = withUsageRecording(
     ctx.prisma,
     { chat: ctx.ai.chat, embeddings: ctx.ai.embeddings },
-    { organizationId: organization.id, feature: "AUTO_REPLY" },
+    { organizationId: organization.id, feature },
     ctx.ai.prices,
   );
 
@@ -85,7 +95,7 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
       ctx.prisma,
       organization.id,
       ctx.ai,
-      { amountUsd: estimateAssistantCostUsd(ctx.ai), feature: "AUTO_REPLY" },
+      { amountUsd: estimateAssistantCostUsd(ctx.ai), feature },
       () =>
         generateGroundedReply({
           provider: recorded.chat,
@@ -102,6 +112,29 @@ export const handleAiReply: JobHandler = async (job, ctx) => {
     }
     if (!isRetryableProviderError(err)) throw new NonRetryableError(errorMessage(err));
     throw err;
+  }
+
+  if (mode === "draft") {
+    // Stored for review only: no outbound message, no send job, no conversation change.
+    await ctx.prisma.aiSuggestion.create({
+      data: {
+        organizationId: organization.id,
+        source: "conversation",
+        conversationId: conversation.id,
+        question: inbound.body ?? "",
+        decision: decision.kind === "reply" ? "REPLY" : "HANDOFF",
+        answer: decision.kind === "reply" ? decision.text : null,
+        handoffReason: decision.kind === "handoff" ? decision.reason : null,
+        withheldDraft: decision.kind === "handoff" ? (decision.withheldDraft ?? null) : null,
+        language: decision.language,
+        model: decision.generation?.model ?? null,
+        sources: decision.sources as unknown as Prisma.InputJsonValue,
+        estimatedCostUsd: new Prisma.Decimal(recorded.tally.costUsd.toFixed(6)),
+        latencyMs: Date.now() - started,
+      },
+    });
+    log.info("ai draft stored for review (not sent)", { decision: decision.kind });
+    return;
   }
 
   if (decision.kind === "handoff") {
