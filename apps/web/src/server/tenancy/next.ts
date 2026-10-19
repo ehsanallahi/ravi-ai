@@ -3,7 +3,7 @@ import type { Permission } from "@ravi/core";
 import { createLogger } from "@ravi/core";
 import { prisma } from "@ravi/db";
 import { notFound, redirect } from "next/navigation";
-import { providerErrorStatus } from "@ravi/ai-engine";
+import { isProviderTimeout, providerErrorStatus } from "@ravi/ai-engine";
 import { AiConfigError, AiGuardError, AssistantInputError, IndexingError } from "@ravi/knowledge";
 import { ExtractionError } from "@ravi/knowledge/extract";
 import { ZodError } from "zod";
@@ -66,6 +66,9 @@ function errorToState(err: unknown): ActionState {
     err instanceof ExtractionError
   ) {
     return { ok: false, error: err.message };
+  }
+  if (isProviderTimeout(err)) {
+    return { ok: false, error: "The AI provider did not respond in time. Try again." };
   }
   const status = providerErrorStatus(err);
   if (status !== null) {

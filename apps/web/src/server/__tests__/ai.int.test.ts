@@ -123,6 +123,25 @@ describe("knowledge documents (tenant-scoped)", () => {
     expect(await listDocuments(await ctxFor(A, "VIEWER"))).toHaveLength(1);
   });
 
+  it("refuses documents containing card numbers or credentials", async () => {
+    const admin = await ctxFor(A, "ADMIN");
+    await expect(
+      createDocument(admin, {
+        title: "Payments",
+        content: "Customers can pay with card 4111 1111 1111 1111 at the counter.",
+        sourceType: "MANUAL",
+      }),
+    ).rejects.toThrow(/payment card numbers/);
+    await expect(
+      createDocument(admin, {
+        title: "Admin notes",
+        content: "Dashboard login password: SuperSecret123 for staff use only.",
+        sourceType: "MANUAL",
+      }),
+    ).rejects.toThrow(/credentials/);
+    expect(await prisma.knowledgeDocument.count()).toBe(0);
+  });
+
   it("rejects duplicate content and validates input", async () => {
     const admin = await ctxFor(A, "ADMIN");
     await createDocument(admin, { title: "Prices", content: KB, sourceType: "MANUAL" });

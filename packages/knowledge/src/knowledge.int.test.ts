@@ -7,7 +7,12 @@ import { askAssistant } from "./assistant";
 import { indexKnowledgeDocument } from "./indexing";
 import { withUsageRecording } from "./recording";
 import { PgHybridRetriever } from "./retriever";
-import { AiConfigError, type AiRuntime, createAiRuntime } from "./runtime";
+import {
+  AiConfigError,
+  type AiRuntime,
+  createAiRuntime,
+  estimateAssistantCostUsd,
+} from "./runtime";
 import { AiGuardError, assertAiAllowed, getAiUsageSummary } from "./usage";
 
 let A: TenantFixture;
@@ -432,5 +437,53 @@ describe("assistant (playground pipeline)", () => {
     await recorded.embeddings.embed([{ text: "hello world" }], "query");
     expect(recorded.tally.calls).toBe(2);
     expect(recorded.tally.costUsd).toBeGreaterThan(0);
+  });
+
+  it("is concurrency-safe: simultaneous questions cannot overspend the budget", async () => {
+    const rt = runtime();
+    // One answer reserves ~$0.0051 (upper bound); a $0.01 budget fits exactly one in flight.
+    expect(estimateAssistantCostUsd(rt)).toBeGreaterThan(0.005);
+    expect(estimateAssistantCostUsd(rt)).toBeLessThan(0.01);
+    await prisma.organization.update({
+      where: { id: A.organization.id },
+      data: { aiMonthlyBudgetUsd: 0.01 },
+    });
+    chat.delayMs = 300;
+    for (let i = 0; i < 4; i++) chat.answer({ answer: "Cotton kurta Rs. 2,500.", sourceIds: [1] });
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () =>
+        askAssistant(prisma, rt, {
+          organizationId: A.organization.id,
+          userId: A.users.ADMIN.id,
+          businessName: "Test Org A",
+          question: "cotton kurta price?",
+        }),
+      ),
+    );
+    const ok = results.filter((r) => r.status === "fulfilled");
+    const refused = results.filter(
+      (r) => r.status === "rejected" && (r.reason as AiGuardError).reason === "budget_exceeded",
+    );
+    expect(ok).toHaveLength(1);
+    expect(refused).toHaveLength(3);
+    // Every reservation is released afterwards; actual cost stays within budget.
+    expect(await prisma.aiBudgetReservation.count({ where: { releasedAt: null } })).toBe(0);
+    const summary = await getAiUsageSummary(prisma, A.organization.id, rt.limits);
+    expect(summary.monthToDateUsd).toBeLessThanOrEqual(0.01);
+  });
+
+  it("releases the reservation even when the provider fails", async () => {
+    chat.respond(Object.assign(new Error("overloaded"), { status: 503 }));
+    await expect(
+      askAssistant(prisma, runtime(), {
+        organizationId: A.organization.id,
+        userId: A.users.ADMIN.id,
+        businessName: "Test Org A",
+        question: "cotton kurta price?",
+      }),
+    ).rejects.toThrow();
+    expect(await prisma.aiBudgetReservation.count({ where: { releasedAt: null } })).toBe(0);
+    expect(await prisma.aiBudgetReservation.count()).toBe(1);
   });
 });

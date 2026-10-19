@@ -53,6 +53,8 @@ export class ScriptedChatProvider implements LLMProvider {
   readonly name = "scripted";
   readonly requests: GenerateParams[] = [];
   private readonly queue: (Partial<GenerateResult> | Error)[] = [];
+  /** Simulated latency, so concurrent calls genuinely overlap in tests. */
+  delayMs = 0;
 
   constructor(readonly model = "scripted-model") {}
 
@@ -83,6 +85,7 @@ export class ScriptedChatProvider implements LLMProvider {
 
   async generate(params: GenerateParams): Promise<GenerateResult> {
     this.requests.push(params);
+    if (this.delayMs) await new Promise((r) => setTimeout(r, this.delayMs));
     const next = this.queue.shift();
     if (next instanceof Error) throw next;
     return {

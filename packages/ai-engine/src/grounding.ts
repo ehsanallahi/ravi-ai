@@ -25,13 +25,13 @@ function canonical(raw: string): string {
 }
 
 /**
- * Numeric values with 2+ digits, as canonical strings. Commas and hyphens inside a number are
+ * All numeric values (including single digits: "3 days", "5 in stock"), as canonical strings. Commas and hyphens inside a number are
  * treated as separators ("1,500" → "1500", "0300-1234567" → "03001234567"). Spaces split numbers,
  * so "10 20" is two values.
  */
 export function extractNumbers(text: string): string[] {
   const matches = normalizeDigits(text).match(/\d(?:[\d,.-]*\d)?/g) ?? [];
-  return matches.map(canonical).filter((m) => m.replace(/\D/g, "").length >= 2);
+  return matches.map(canonical).filter((m) => /\d/.test(m));
 }
 
 export function extractUrls(text: string): string[] {
@@ -47,7 +47,7 @@ export interface GroundingResult {
 }
 
 /**
- * Every multi-digit number (price, quantity, stock level, phone, date) and every URL in the reply
+ * Every number, including single digits (price, quantity, stock level, days, phone, date), and every URL in the reply
  * must exactly match one in the evidence (sources plus the customer's messages). Otherwise the
  * reply is not used and the conversation goes to a human.
  */

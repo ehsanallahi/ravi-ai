@@ -126,6 +126,16 @@ export const aiEnvShape = {
     z.coerce.number().int().min(1).max(100_000).default(200),
   ),
   AI_AUTO_REPLY_ENABLED: booleanFromString,
+  /** Per-attempt timeout for Gemini requests (ms). */
+  GEMINI_TIMEOUT_MS: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(1000).max(120_000).default(30_000),
+  ),
+  /** Attempts per Gemini request, including the first (retries only on 408/429/5xx). */
+  GEMINI_MAX_ATTEMPTS: z.preprocess(
+    emptyAsUndefined,
+    z.coerce.number().int().min(1).max(5).default(3),
+  ),
   /** Minimum cosine similarity for a knowledge chunk to count as relevant (tune with pnpm ai:eval). */
   AI_RETRIEVAL_MIN_SIMILARITY: z.preprocess(
     emptyAsUndefined,

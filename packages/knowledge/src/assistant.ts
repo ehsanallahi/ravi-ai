@@ -2,8 +2,8 @@ import { generateGroundedReply, type ReplyDecision } from "@ravi/ai-engine";
 import { Prisma, type PrismaClient } from "@ravi/db";
 import { withUsageRecording } from "./recording";
 import { PgHybridRetriever } from "./retriever";
-import type { AiRuntime } from "./runtime";
-import { assertAiAllowed } from "./usage";
+import { type AiRuntime, estimateAssistantCostUsd } from "./runtime";
+import { withAiBudget } from "./usage";
 
 export const MAX_QUESTION_CHARS = 2000;
 
@@ -30,8 +30,21 @@ export async function askAssistant(
     throw new AssistantInputError(`Questions are limited to ${MAX_QUESTION_CHARS} characters`);
   }
 
-  await assertAiAllowed(prisma, input.organizationId, runtime);
+  return withAiBudget(
+    prisma,
+    input.organizationId,
+    runtime,
+    { amountUsd: estimateAssistantCostUsd(runtime), feature: "PLAYGROUND" },
+    () => runAssistant(prisma, runtime, { ...input, question }),
+  );
+}
 
+async function runAssistant(
+  prisma: PrismaClient,
+  runtime: AiRuntime,
+  input: { organizationId: string; userId: string; businessName: string; question: string },
+): Promise<{ suggestionId: string; decision: ReplyDecision }> {
+  const { question } = input;
   const started = Date.now();
   const recorded = withUsageRecording(
     prisma,

@@ -215,6 +215,17 @@ describe("grounding checks", () => {
     ]);
   });
 
+  it("checks single-digit numbers too (invented days or stock counts)", () => {
+    const evidence = ["Delivery in Lahore takes 2 days."];
+    expect(checkGrounding("Delivery takes 2 days.", evidence).ok).toBe(true);
+    expect(checkGrounding("Delivery takes 3 days.", evidence)).toMatchObject({
+      ok: false,
+      unsupportedNumbers: ["3"],
+    });
+    expect(checkGrounding("We have 5 in stock.", evidence).ok).toBe(false);
+    expect(checkGrounding("ڈیلیوری ۳ دن میں ہوگی", evidence).ok).toBe(false);
+  });
+
   it("does not accept a number just because its digits appear inside a larger one", () => {
     expect(checkGrounding("It costs Rs. 25.", ["It costs Rs. 2500."]).ok).toBe(false);
   });

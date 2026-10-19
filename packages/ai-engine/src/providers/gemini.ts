@@ -39,10 +39,44 @@ export interface GeminiModelsClient {
   }): Promise<{ embeddings?: { values?: number[] }[] }>;
 }
 
-export function createGeminiModelsClient(apiKey: string): GeminiModelsClient {
+export interface GeminiClientOptions {
+  /** Per-attempt timeout in ms (the SDK has none by default, so a hung call would never end). */
+  timeoutMs?: number;
+  /** Attempts including the first; retries only transient statuses (408, 429, 5xx). */
+  maxAttempts?: number;
+  /** Override for tests (local mock server). */
+  baseUrl?: string;
+}
+
+export const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+
+export function createGeminiModelsClient(
+  apiKey: string,
+  options: GeminiClientOptions = {},
+): GeminiModelsClient {
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+  const attempts = Math.min(Math.max(options.maxAttempts ?? 3, 1), 5);
   // Server-side only. The key never leaves the server process.
-  return new GoogleGenAI({ apiKey }).models as unknown as GeminiModelsClient;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      timeout: options.timeoutMs ?? 30_000,
+      ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+      // Bounded exponential backoff. Failed attempts are not billed by the API; only the final
+      // outcome is recorded in AiUsageEvent.
+      retryOptions:
+        attempts > 1
+          ? {
+              attempts,
+              initialDelay: 1,
+              maxDelay: 8,
+              expBase: 2,
+              jitter: 1,
+              httpStatusCodes: RETRYABLE_STATUS_CODES,
+            }
+          : undefined,
+    },
+  }).models as unknown as GeminiModelsClient;
 }
 
 export type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";

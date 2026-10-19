@@ -2,8 +2,11 @@ import { sha256Hex } from "@ravi/core";
 import { prisma } from "@ravi/db";
 import {
   type AiRuntime,
-  assertAiAllowed,
+  estimateIndexingCostUsd,
+  FINDING_TEXT,
+  scanKnowledgeContent,
   indexKnowledgeDocument,
+  withAiBudget,
   withUsageRecording,
 } from "@ravi/knowledge";
 import { MAX_DOCUMENT_CHARS, normalizeText } from "@ravi/knowledge/extract";
@@ -86,6 +89,13 @@ export async function createDocument(
 ) {
   assertPermission(ctx, "knowledge:write");
   const data = documentInputSchema.parse({ title: input.title, content: input.content });
+  // Never store or send card numbers or credentials to the AI provider.
+  const blocked = scanKnowledgeContent(data.content).filter((f) => f.severity === "block");
+  if (blocked.length) {
+    throw new DomainError(
+      `This document appears to contain ${blocked.map((f) => FINDING_TEXT[f.kind]).join(" and ")}. Remove them and try again.`,
+    );
+  }
   const checksum = sha256Hex(data.content);
   const duplicate = await prisma.knowledgeDocument.findFirst({
     where: { organizationId: ctx.organizationId, checksum, status: { not: "ARCHIVED" } },
@@ -127,10 +137,9 @@ export async function indexDocument(ctx: TenantContext, runtime: AiRuntime, id: 
   assertPermission(ctx, "knowledge:write");
   const doc = await prisma.knowledgeDocument.findFirst({
     where: { id, organizationId: ctx.organizationId },
-    select: { id: true },
+    select: { id: true, content: true },
   });
   if (!doc) throw notFoundInTenant("Document");
-  await assertAiAllowed(prisma, ctx.organizationId, runtime);
 
   const recorded = withUsageRecording(
     prisma,
@@ -138,10 +147,22 @@ export async function indexDocument(ctx: TenantContext, runtime: AiRuntime, id: 
     { organizationId: ctx.organizationId, userId: ctx.userId, feature: "KNOWLEDGE_INDEXING" },
     runtime.prices,
   );
-  const result = await indexKnowledgeDocument(prisma, recorded.embeddings, {
-    organizationId: ctx.organizationId,
-    documentId: doc.id,
-  });
+  // Concurrency-safe: consent, budget (incl. in-flight calls) and hourly cap are checked and an
+  // upper-bound cost is reserved under a per-organization lock.
+  const result = await withAiBudget(
+    prisma,
+    ctx.organizationId,
+    runtime,
+    {
+      amountUsd: estimateIndexingCostUsd(runtime, doc.content ?? ""),
+      feature: "KNOWLEDGE_INDEXING",
+    },
+    () =>
+      indexKnowledgeDocument(prisma, recorded.embeddings, {
+        organizationId: ctx.organizationId,
+        documentId: doc.id,
+      }),
+  );
   await writeAudit(prisma, {
     organizationId: ctx.organizationId,
     actorUserId: ctx.userId,

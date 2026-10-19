@@ -1,6 +1,9 @@
 import {
   type AiProviders,
   createAiProviders,
+  estimateChatCostUsd,
+  estimateEmbeddingCostUsd,
+  estimateTokensFromText,
   type EmbeddingProvider,
   type GeminiModelsClient,
   hasKnownChatPrice,
@@ -72,6 +75,8 @@ export function createAiRuntime(
             embeddingModel: env.GEMINI_EMBEDDING_MODEL,
             embeddingDimensions: env.GEMINI_EMBEDDING_DIMENSIONS,
             thinkingLevel: env.GEMINI_THINKING_LEVEL,
+            timeoutMs: env.GEMINI_TIMEOUT_MS,
+            maxAttempts: env.GEMINI_MAX_ATTEMPTS,
             client: options.client,
           }
         : { provider: "disabled" },
@@ -93,4 +98,31 @@ export function createAiRuntime(
       dimensions: env.GEMINI_EMBEDDING_DIMENSIONS,
     },
   };
+}
+
+/** Upper bounds for one assistant answer (system prompt + up to 5 sources + question). */
+export const ASSISTANT_MAX_INPUT_TOKENS = 8_000;
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 1_024;
+export const ASSISTANT_MAX_THINKING_TOKENS = 1_024;
+
+/** Conservative cost of one assistant answer, reserved before the call. */
+export function estimateAssistantCostUsd(runtime: AiRuntime): number {
+  const chat = estimateChatCostUsd(
+    runtime.models.chat,
+    {
+      inputTokens: ASSISTANT_MAX_INPUT_TOKENS,
+      outputTokens: ASSISTANT_MAX_OUTPUT_TOKENS,
+      thinkingTokens: ASSISTANT_MAX_THINKING_TOKENS,
+    },
+    new Date(),
+    runtime.prices,
+  );
+  const query = estimateEmbeddingCostUsd(runtime.models.embedding, 600, runtime.prices);
+  return chat + query;
+}
+
+/** Conservative cost of embedding a document (chunk overlap and task prefixes add ~25%). */
+export function estimateIndexingCostUsd(runtime: AiRuntime, text: string): number {
+  const tokens = Math.ceil(estimateTokensFromText(text) * 1.25) + 50;
+  return estimateEmbeddingCostUsd(runtime.models.embedding, tokens, runtime.prices);
 }

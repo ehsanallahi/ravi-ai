@@ -3,6 +3,10 @@ import { extractText, getDocumentProxy } from "unpdf";
 /** Byte-order mark (U+FEFF) some editors add to the start of UTF-8 files. */
 const BOM_PATTERN = new RegExp(`^${String.fromCharCode(0xfeff)}`);
 
+/** PDF limits: bound CPU/memory spent on untrusted files. */
+export const MAX_PDF_PAGES = 200;
+export const PDF_EXTRACTION_TIMEOUT_MS = 20_000;
+
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 /** Upper bound on stored document text (≈ 50k tokens), keeps indexing cost predictable. */
 export const MAX_DOCUMENT_CHARS = 200_000;
@@ -64,14 +68,36 @@ export async function extractDocumentText(
 
   let text: string;
   if (kind === "pdf") {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pdf: Awaited<ReturnType<typeof getDocumentProxy>> | undefined;
     try {
-      const pdf = await getDocumentProxy(new Uint8Array(bytes));
-      const result = await extractText(pdf, { mergePages: true });
+      // Untrusted input: no font loading or XFA forms; bounded pages and time.
+      pdf = await getDocumentProxy(new Uint8Array(bytes), {
+        disableFontFace: true,
+        useSystemFonts: false,
+        enableXfa: false,
+      });
+      if (pdf.numPages > MAX_PDF_PAGES) {
+        throw new ExtractionError(`PDFs are limited to ${MAX_PDF_PAGES} pages.`);
+      }
+      const result = await Promise.race([
+        extractText(pdf, { mergePages: true }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new ExtractionError("Reading this PDF took too long.")),
+            PDF_EXTRACTION_TIMEOUT_MS,
+          );
+        }),
+      ]);
       text = result.text;
-    } catch {
+    } catch (err) {
+      if (err instanceof ExtractionError) throw err;
       throw new ExtractionError(
         "Could not read text from this PDF (it may be scanned or encrypted).",
       );
+    } finally {
+      if (timer) clearTimeout(timer);
+      await pdf?.loadingTask.destroy().catch(() => undefined);
     }
   } else {
     text = decodeUtf8(bytes);

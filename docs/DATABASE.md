@@ -156,6 +156,7 @@ database, and a drift check shows none.
 | `Organization.aiDataConsentAt`, `aiDataConsentByUserId`                                      | Owner opt-in before data goes to the AI provider                                                   |
 | `Organization.aiMonthlyBudgetUsd`                                                            | Per-organization cap, never above the platform cap                                                 |
 | `AiUsageEvent`                                                                               | One row per provider call: model, tokens, dimensions, estimated cost, latency, success, error code |
+| `AiBudgetReservation`                                                                        | In-flight cost reservations so parallel requests cannot overspend; released after each call        |
 | `AiSuggestion`                                                                               | Playground answers with sources, decision, cost and review (status, rating, notes)                 |
 
 - **Chunks are derived data.** Re-indexing replaces only that document's chunks, in one

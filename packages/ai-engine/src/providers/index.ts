@@ -11,6 +11,8 @@ import {
 export { DisabledEmbeddingProvider, DisabledProvider, ProviderDisabledError } from "./disabled";
 export {
   createGeminiModelsClient,
+  type GeminiClientOptions,
+  RETRYABLE_STATUS_CODES,
   EmbeddingDimensionError,
   GeminiChatProvider,
   GeminiEmbeddingProvider,
@@ -27,6 +29,8 @@ export type AiProviderConfig =
       embeddingModel: string;
       embeddingDimensions: number;
       thinkingLevel?: GeminiThinkingLevel;
+      timeoutMs?: number;
+      maxAttempts?: number;
       /** Inject a mock in tests. */
       client?: GeminiModelsClient;
     };
@@ -49,7 +53,12 @@ export function createAiProviders(config: AiProviderConfig): AiProviders {
       enabled: false,
     };
   }
-  const client = config.client ?? createGeminiModelsClient(config.apiKey);
+  const client =
+    config.client ??
+    createGeminiModelsClient(config.apiKey, {
+      timeoutMs: config.timeoutMs,
+      maxAttempts: config.maxAttempts,
+    });
   return {
     chat: new GeminiChatProvider({
       client,
@@ -79,9 +88,16 @@ export function isRetryableProviderError(err: unknown): boolean {
   return status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
+/** True when the request was aborted by the per-attempt timeout. */
+export function isProviderTimeout(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === "AbortError" || name === "TimeoutError";
+}
+
 /** A short, non-sensitive error code for usage logs (never the message, which may echo input). */
 export function providerErrorCode(err: unknown): string {
   if (err instanceof ProviderDisabledError) return "provider_disabled";
+  if (isProviderTimeout(err)) return "timeout";
   const status = providerErrorStatus(err);
   if (status !== null) return `http_${status}`;
   return err instanceof Error ? err.name : "unknown";

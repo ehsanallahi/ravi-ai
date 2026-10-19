@@ -105,8 +105,11 @@ Then:
 2. `pnpm ai:check` confirms which models your key can access, and that the chat model, the
    embedding model and the 768 dimensions work. It sends synthetic text only.
 3. `pnpm ai:eval -- --models gemini-3.1-flash-lite,gemini-3.5-flash-lite --yes` compares models
-   on synthetic English, Urdu and Roman Urdu cases (a few cents).
-4. In the app, an **owner** enables AI data processing under **Settings**. Admins then add
+   on synthetic English, Urdu and Roman Urdu cases (a few cents). Safety (unsafe or unsupported
+   answers) is reported separately from quality.
+4. `pnpm ai:kb-test` runs an end-to-end knowledge-base check against the local dev database with
+   fictional data: it creates two new demo organizations and never changes existing records.
+5. In the app, an **owner** enables AI data processing under **Settings**. Admins then add
    documents under **Knowledge base**, index them, and test answers in the **AI playground**.
 
 The assistant answers only from indexed knowledge and cites its sources. It hands off when it is
@@ -174,6 +177,7 @@ Inbound messages then appear under **Conversations** and **Contacts** for that o
 | `pnpm db:pgvector:setup` | Windows: builds pgvector for the local PostgreSQL (once)              |
 | `pnpm ai:check`          | Verifies your Gemini key, models and dimensions (synthetic text only) |
 | `pnpm ai:eval`           | Synthetic multilingual model evaluation (needs `--yes`; costs cents)  |
+| `pnpm ai:kb-test`        | Real-Gemini knowledge-base test on the dev DB with fictional data     |
 | `pnpm db:migrate:deploy` | Applies pending migrations                                            |
 | `pnpm db:migrate:dev`    | Creates a migration. **Local, disposable databases only.**            |
 | `pnpm db:studio`         | Prisma Studio                                                         |

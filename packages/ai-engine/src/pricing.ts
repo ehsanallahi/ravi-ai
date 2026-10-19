@@ -101,7 +101,11 @@ export function estimateEmbeddingCostUsd(
   return (inputTokens * embeddingPrice(model, overrides)) / 1_000_000;
 }
 
-/** Rough token estimate when an API does not report usage (≈4 characters per token). */
+/**
+ * Conservative token estimate when an API does not report usage: ≈4 UTF-8 bytes per token.
+ * English is ~1 byte per character (≈4 chars/token); Urdu script is 2 bytes per character, so it
+ * counts about twice as many tokens per character, which avoids under-estimating Urdu costs.
+ */
 export function estimateTokensFromText(text: string): number {
-  return Math.ceil(text.length / 4);
+  return Math.ceil(new TextEncoder().encode(text).length / 4);
 }
