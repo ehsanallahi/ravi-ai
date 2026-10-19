@@ -20,8 +20,10 @@ export function AiConsentForm({ orgSlug, granted }: { orgSlug: string; granted: 
           Google&apos;s Gemini API.
         </li>
         <li>
-          Customer WhatsApp messages are NOT sent; automatic replies stay off until separately
-          approved.
+          When AI draft replies are enabled, each incoming customer WhatsApp text, and up to 10
+          earlier messages from the same conversation, are sent to Gemini to write a suggested reply
+          for your team to review. Drafts are never sent to WhatsApp; automatic replies stay off
+          until separately approved.
         </li>
         <li>
           Use a <strong>paid</strong> Gemini API tier: Google states free-tier data may be used to

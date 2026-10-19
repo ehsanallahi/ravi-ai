@@ -144,15 +144,25 @@ async function ingestInboundMessage(
     optOut,
   });
 
-  const aiEligible =
-    ctx.env.AI_AUTO_REPLY_ENABLED &&
-    account.organization.aiAutoReplyEnabled &&
-    conversation.aiEnabled &&
-    !contact.optedOutAt &&
-    message.type === "TEXT" &&
-    !!message.body;
+  const answerable =
+    conversation.aiEnabled && !contact.optedOutAt && message.type === "TEXT" && !!message.body;
+  const autoReply =
+    answerable && ctx.env.AI_AUTO_REPLY_ENABLED && account.organization.aiAutoReplyEnabled;
+  // Draft mode: Gemini writes a suggested reply for a human to review. It is never sent.
+  const draft = answerable && !autoReply && ctx.env.AI_DRAFT_REPLIES_ENABLED && ctx.ai.configured;
 
-  if (aiEligible) {
+  if (draft) {
+    await enqueueJob(ctx.prisma, {
+      type: JOB_TYPES.aiReply,
+      payload: { messageId: message.id, mode: "draft" },
+      dedupeKey: `ai-draft:${message.id}`,
+      organizationId,
+      runAt: new Date(ctx.now().getTime() + AI_REPLY_DEBOUNCE_MS),
+      maxAttempts: 3,
+    });
+  }
+
+  if (autoReply) {
     await enqueueJob(ctx.prisma, {
       type: JOB_TYPES.aiReply,
       payload: { messageId: message.id },

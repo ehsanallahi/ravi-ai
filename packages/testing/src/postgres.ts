@@ -5,6 +5,10 @@ import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import EmbeddedPostgres from "embedded-postgres";
+import { installExitCodeGuard } from "./exit-code-guard";
+
+// Importing embedded-postgres registers an exit hook that would mask failing test runs.
+installExitCodeGuard();
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, "../../..");

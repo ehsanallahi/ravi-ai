@@ -39,6 +39,7 @@ async function main() {
 
   log.info("worker started", {
     aiAutoReply: env.AI_AUTO_REPLY_ENABLED,
+    aiDraftReplies: env.AI_DRAFT_REPLIES_ENABLED,
     aiConfigured: ctx.ai.configured,
     chatModel: ctx.ai.models.chat,
     batchSize: env.WORKER_BATCH_SIZE,

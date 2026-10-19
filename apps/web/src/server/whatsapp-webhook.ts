@@ -47,8 +47,9 @@ export async function handleWebhookEvent(request: Request, deps: WebhookDeps): P
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
   if (declaredLength > MAX_WEBHOOK_BODY_BYTES) return text("Payload too large", 413);
 
-  const rawBody = await request.text();
-  if (Buffer.byteLength(rawBody, "utf8") > MAX_WEBHOOK_BODY_BYTES) {
+  // HMAC over the exact bytes received (decoding first could alter invalid UTF-8 sequences).
+  const rawBody = Buffer.from(await request.arrayBuffer());
+  if (rawBody.byteLength > MAX_WEBHOOK_BODY_BYTES) {
     return text("Payload too large", 413);
   }
 
@@ -59,7 +60,7 @@ export async function handleWebhookEvent(request: Request, deps: WebhookDeps): P
 
   let json: unknown;
   try {
-    json = JSON.parse(rawBody);
+    json = JSON.parse(rawBody.toString("utf8"));
   } catch {
     // Authentic but unparseable: acknowledge so Meta does not retry for days.
     deps.log.warn("webhook body is not valid JSON");

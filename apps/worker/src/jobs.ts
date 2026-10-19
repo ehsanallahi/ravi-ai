@@ -32,6 +32,16 @@ export function isWithinServiceWindow(lastInboundAt: Date | null, now: Date): bo
   return !!lastInboundAt && now.getTime() - lastInboundAt.getTime() < CUSTOMER_SERVICE_WINDOW_MS;
 }
 
+/**
+ * "auto": the reply may be sent (needs AI_AUTO_REPLY_ENABLED). "draft": stored for review only;
+ * a draft job never creates an outbound message or a send job. Older jobs without a mode are "auto".
+ */
+export type AiReplyMode = "auto" | "draft";
+
+export function aiReplyModeFromPayload(payload: unknown): AiReplyMode {
+  return (payload as { mode?: unknown } | null)?.mode === "draft" ? "draft" : "auto";
+}
+
 /** Payload for jobs that reference a single message. */
 export function messageIdFromPayload(payload: unknown): string {
   const id = (payload as { messageId?: unknown } | null)?.messageId;

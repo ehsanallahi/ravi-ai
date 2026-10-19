@@ -125,18 +125,25 @@ Set `EMAIL_PROVIDER="resend"`, `RESEND_API_KEY` and `EMAIL_FROM` (a sender on a 
 in Resend). The app refuses to start authentication in production with the outbox adapter or a
 non-https `BETTER_AUTH_URL`.
 
-### Connecting the Meta webhook (unchanged from Phase 1)
+### Connecting the Meta webhook
 
-1. Expose the web app over **HTTPS with a valid certificate** (a tunnel such as `cloudflared` works
-   for testing).
-2. In the Meta App Dashboard → **WhatsApp → Configuration → Webhook**, set the callback URL
-   `https://<your-host>/api/webhooks/whatsapp` and the verify token `WHATSAPP_VERIFY_TOKEN`.
-3. Subscribe to the **`messages`** field.
-4. Register the number for an organization:
-   `pnpm --filter @ravi/db account:register --org-slug your-business --org-name "Your Business" --phone-number-id <ID> --waba-id <WABA_ID>`
-   (the token is read from `WHATSAPP_ACCESS_TOKEN` and stored encrypted).
+See [docs/WHATSAPP_SETUP.md](docs/WHATSAPP_SETUP.md) for the variables, the read-only connection
+check, the tunnel and the inbound test plan. In short:
+
+1. `pnpm whatsapp:check` verifies your configuration and, with read-only Graph API calls, the
+   phone number, the WhatsApp Business Account and the webhook subscription.
+2. Register the number for an organization:
+   `pnpm --filter @ravi/db account:register --org-slug your-business --org-name "Your Business"`
+   (IDs default to `WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_BUSINESS_ACCOUNT_ID`; the token is read
+   from `WHATSAPP_ACCESS_TOKEN` and stored encrypted).
+3. `pnpm whatsapp:simulate -- --text "..."` posts a signed fictional message to the local webhook.
+4. Expose the app over HTTPS (e.g. `cloudflared tunnel --url http://localhost:3000`) and set the
+   callback URL `https://<host>/api/webhooks/whatsapp`, the verify token `WHATSAPP_VERIFY_TOKEN`,
+   and the `messages` field in Meta App Dashboard → WhatsApp → Configuration.
 
 Inbound messages then appear under **Conversations** and **Contacts** for that organization only.
+With `AI_DRAFT_REPLIES_ENABLED=true`, Gemini also writes a draft reply for review on the
+conversation page. **Drafts are never sent.**
 
 ## Security model
 
@@ -180,6 +187,8 @@ Inbound messages then appear under **Conversations** and **Contacts** for that o
 | `pnpm ai:check`          | Verifies your Gemini key, models and dimensions (synthetic text only) |
 | `pnpm ai:eval`           | Synthetic multilingual model evaluation (needs `--yes`; costs cents)  |
 | `pnpm ai:kb-test`        | Real-Gemini knowledge-base test on the dev DB with fictional data     |
+| `pnpm whatsapp:check`    | Read-only WhatsApp Cloud API connection diagnostic (no messages)      |
+| `pnpm whatsapp:simulate` | Posts a signed fictional inbound message to the local webhook         |
 | `pnpm db:migrate:deploy` | Applies pending migrations                                            |
 | `pnpm db:migrate:dev`    | Creates a migration. **Local, disposable databases only.**            |
 | `pnpm db:studio`         | Prisma Studio                                                         |

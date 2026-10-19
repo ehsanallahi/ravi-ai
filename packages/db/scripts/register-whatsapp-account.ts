@@ -5,7 +5,10 @@
  * Usage (from repo root):
  *   pnpm --filter @ravi/db account:register \
  *     --org-name "Your Business" --org-slug your-business \
- *     --phone-number-id <ID from Meta> --waba-id <WABA ID> [--display-phone "+1 555 …"]
+ *     [--phone-number-id <ID from Meta>] [--waba-id <WABA ID>] [--display-phone "+1 555 …"]
+ *
+ * --phone-number-id and --waba-id default to WHATSAPP_PHONE_NUMBER_ID and
+ * WHATSAPP_BUSINESS_ACCOUNT_ID from .env.
  *
  * The access token is read from WHATSAPP_ACCESS_TOKEN (never pass it on the command line,
  * because it would end up in shell history) and stored encrypted with ENCRYPTION_KEY.
@@ -31,11 +34,14 @@ async function main() {
 
   const orgName = values["org-name"]?.trim();
   const orgSlug = values["org-slug"]?.trim().toLowerCase();
-  const phoneNumberId = values["phone-number-id"]?.trim();
-  const wabaId = values["waba-id"]?.trim();
+  // Fall back to the IDs in .env (not secrets; shown in Meta App Dashboard → WhatsApp → API Setup).
+  const phoneNumberId = (values["phone-number-id"] ?? process.env.WHATSAPP_PHONE_NUMBER_ID)?.trim();
+  const wabaId = (values["waba-id"] ?? process.env.WHATSAPP_BUSINESS_ACCOUNT_ID)?.trim();
 
   if (!orgName || !orgSlug || !phoneNumberId || !wabaId) {
-    throw new Error("Required: --org-name, --org-slug, --phone-number-id, --waba-id");
+    throw new Error(
+      "Required: --org-name, --org-slug, and --phone-number-id/--waba-id (or WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_BUSINESS_ACCOUNT_ID)",
+    );
   }
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(orgSlug)) throw new Error("--org-slug must be kebab-case");
   if (!/^\d+$/.test(phoneNumberId) || !/^\d+$/.test(wabaId)) {

@@ -96,6 +96,9 @@ export default async function AiPlaygroundPage({
                       {s.decision === "REPLY" ? "Answered" : "Handed off"}
                     </Badge>
                     <Badge variant="secondary">{statusLabel(s.status)}</Badge>
+                    {s.source === "conversation" ? (
+                      <Badge variant="outline">WhatsApp draft</Badge>
+                    ) : null}
                     {formatDateTime(s.createdAt)}
                   </span>
                 </Link>

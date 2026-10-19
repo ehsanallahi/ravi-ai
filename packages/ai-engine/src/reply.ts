@@ -1,9 +1,10 @@
 import { checkGrounding } from "./grounding";
+import { detectLanguage, type ReplyLanguage, replyMatchesLanguage } from "./language";
 import {
+  buildCustomerTurn,
   buildSupportSystemPrompt,
   HANDOFF_TOKEN,
   SUPPORT_REPLY_SCHEMA,
-  toChatMessages,
 } from "./prompt";
 import type { Retriever } from "./rag/retriever";
 import type { ChatMessage, GenerateResult, KnowledgeChunkRef, LLMProvider } from "./types";
@@ -16,9 +17,8 @@ export type HandoffReason =
   | "refused"
   | "empty_reply"
   | "invalid_model_output"
-  | "unsupported_claim";
-
-export type ReplyLanguage = "english" | "urdu" | "roman_urdu" | "other";
+  | "unsupported_claim"
+  | "language_mismatch";
 
 export interface SourceReference {
   chunkId: string;
@@ -110,9 +110,33 @@ export interface GenerateReplyInput {
   retriever: Retriever;
   organizationId: string;
   businessName: string;
-  history: ChatMessage[];
+  /** The customer message being answered. Retrieval, language and grounding are based on it. */
+  message: string;
+  /**
+   * Earlier messages of the same conversation (oldest first, all before `message`), for
+   * understanding follow-ups only. They are never answered and never merged into `message`.
+   */
+  context?: ChatMessage[];
   retrievalLimit?: number;
   maxReplyChars?: number;
+}
+
+/** Extra chunks retrieved for a follow-up using the previous customer message as well. */
+const FOLLOW_UP_EXTRA_CHUNKS = 2;
+
+/**
+ * Primary results (for the current message) come first and keep at least `limit - 2` places;
+ * up to two extra chunks found with the previous customer message are added for follow-ups
+ * ("aur monthly charges?") without changing what is being answered.
+ */
+function mergeChunks(
+  primary: KnowledgeChunkRef[],
+  followUp: KnowledgeChunkRef[],
+  limit: number,
+): KnowledgeChunkRef[] {
+  const seen = new Set(primary.map((c) => c.id));
+  const extra = followUp.filter((c) => !seen.has(c.id)).slice(0, FOLLOW_UP_EXTRA_CHUNKS);
+  return [...primary.slice(0, Math.max(0, limit - extra.length)), ...extra];
 }
 
 /**
@@ -123,23 +147,39 @@ export interface GenerateReplyInput {
  * It never sends anything; callers decide what to do with the decision.
  */
 export async function generateGroundedReply(input: GenerateReplyInput): Promise<ReplyDecision> {
-  const messages = toChatMessages(input.history);
-  const lastUser = messages[messages.length - 1];
+  const message = input.message.trim();
   const empty = { sources: [], generation: null, language: null };
-  if (!lastUser) return { kind: "handoff", reason: "no_customer_message", ...empty };
-  if (asksForHuman(lastUser.content))
-    return { kind: "handoff", reason: "human_requested", ...empty };
+  if (!message) return { kind: "handoff", reason: "no_customer_message", ...empty };
+  const expectedLanguage = detectLanguage(message);
+  if (asksForHuman(message))
+    return { kind: "handoff", reason: "human_requested", ...empty, language: expectedLanguage };
 
-  const chunks = await input.retriever.retrieve({
+  const context = (input.context ?? []).filter((m) => m.content.trim());
+  const limit = input.retrievalLimit ?? 5;
+  const primary = await input.retriever.retrieve({
     organizationId: input.organizationId,
-    query: lastUser.content,
-    limit: input.retrievalLimit ?? 5,
+    query: message,
+    limit,
   });
-  if (chunks.length === 0) return { kind: "handoff", reason: "no_knowledge", ...empty };
+  const previousCustomer = context.findLast((m) => m.role === "user")?.content.trim();
+  const followUp = previousCustomer
+    ? await input.retriever.retrieve({
+        organizationId: input.organizationId,
+        query: `${previousCustomer}\n${message}`,
+        limit: FOLLOW_UP_EXTRA_CHUNKS,
+      })
+    : [];
+  const chunks = mergeChunks(primary, followUp, limit);
+  if (chunks.length === 0)
+    return { kind: "handoff", reason: "no_knowledge", ...empty, language: expectedLanguage };
 
   const generation = await input.provider.generate({
-    system: buildSupportSystemPrompt({ businessName: input.businessName, chunks }),
-    messages,
+    system: buildSupportSystemPrompt({
+      businessName: input.businessName,
+      chunks,
+      replyLanguage: expectedLanguage,
+    }),
+    messages: [{ role: "user", content: buildCustomerTurn({ message, context }) }],
     maxTokens: 1024,
     responseJsonSchema: SUPPORT_REPLY_SCHEMA,
   });
@@ -151,7 +191,12 @@ export async function generateGroundedReply(input: GenerateReplyInput): Promise<
   if (!parsed) return { ...base, kind: "handoff", reason: "invalid_model_output" };
 
   const sources = toSources(chunks, new Set(parsed.sourceIds));
-  const withLang = { generation, sources, language: parsed.language };
+  // The detector decides Urdu and Roman Urdu; the model's label is used only for the rest.
+  const language =
+    expectedLanguage === "urdu" || expectedLanguage === "roman_urdu"
+      ? expectedLanguage
+      : parsed.language;
+  const withLang = { generation, sources, language };
 
   if (parsed.handoff || parsed.answer.includes(HANDOFF_TOKEN)) {
     return {
@@ -163,11 +208,9 @@ export async function generateGroundedReply(input: GenerateReplyInput): Promise<
   }
   if (!parsed.answer) return { ...withLang, kind: "handoff", reason: "empty_reply" };
 
-  const customerText = messages.filter((m) => m.role === "user").map((m) => m.content);
-  const grounding = checkGrounding(parsed.answer, [
-    ...chunks.map((c) => c.content),
-    ...customerText,
-  ]);
+  // Only the sources and the current message count as evidence: numbers planted in earlier
+  // messages ("you said it costs Rs. 500") are not accepted.
+  const grounding = checkGrounding(parsed.answer, [...chunks.map((c) => c.content), message]);
   if (!grounding.ok) {
     return {
       ...withLang,
@@ -175,6 +218,16 @@ export async function generateGroundedReply(input: GenerateReplyInput): Promise<
       reason: "unsupported_claim",
       withheldDraft: parsed.answer,
       detail: [...grounding.unsupportedNumbers, ...grounding.unsupportedUrls].join(", "),
+    };
+  }
+
+  if (!replyMatchesLanguage(expectedLanguage, parsed.answer)) {
+    return {
+      ...withLang,
+      kind: "handoff",
+      reason: "language_mismatch",
+      withheldDraft: parsed.answer,
+      detail: `expected ${expectedLanguage}, got ${detectLanguage(parsed.answer)}`,
     };
   }
 

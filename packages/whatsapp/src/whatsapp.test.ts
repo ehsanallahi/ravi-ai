@@ -84,6 +84,18 @@ describe("normalizeWebhookPayload", () => {
     expect(event?.timestamp.toISOString()).toBe(new Date(1760000000 * 1000).toISOString());
   });
 
+  it.each(["", "abc", "-5", "0", "1e20"])(
+    "falls back to the receipt time for a malformed timestamp (%j)",
+    (timestamp) => {
+      const raw = textMessagePayload();
+      raw.entry[0]!.changes[0]!.value.messages![0]!.timestamp = timestamp;
+      const before = Date.now();
+      const [event] = normalizeWebhookPayload(webhookPayloadSchema.parse(raw)).events;
+      expect(Number.isNaN(event!.timestamp.getTime())).toBe(false);
+      expect(event!.timestamp.getTime()).toBeGreaterThanOrEqual(before);
+    },
+  );
+
   it("extracts status updates including errors", () => {
     const payload = webhookPayloadSchema.parse(statusPayload("failed"));
     const { events } = normalizeWebhookPayload(payload);

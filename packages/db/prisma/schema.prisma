@@ -351,6 +351,7 @@ model Message {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
   sentBy       User?        @relation("MessageSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  aiSuggestions AiSuggestion[]
 
   @@unique([organizationId, waMessageId])
   @@index([conversationId, createdAt])
@@ -440,6 +441,7 @@ enum AiFeature {
   PLAYGROUND
   KNOWLEDGE_INDEXING
   AUTO_REPLY
+  DRAFT_REPLY
 }
 
 enum AiSuggestionStatus {
@@ -499,9 +501,12 @@ model AiSuggestion {
   id               String               @id @default(cuid())
   organizationId   String
   createdByUserId  String?
-  /// "playground" now; "conversation" when draft mode for real chats is approved.
+  /// "playground" (AI playground) or "conversation" (draft for an inbound WhatsApp message; never sent).
   source           String               @default("playground")
   conversationId   String?
+  /// The inbound message a conversation draft answers. Unique: one draft per message, so a
+  /// retried or duplicated job cannot store a second draft or attach it to another message.
+  messageId        String?              @unique
   question         String               @db.Text
   decision         AiSuggestionDecision
   answer           String?              @db.Text
@@ -522,8 +527,10 @@ model AiSuggestion {
   createdAt        DateTime             @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, conversationId, createdAt])
 }
 
 /// Durable job queue (see docs/ARCHITECTURE.md §4). Handlers must be idempotent.

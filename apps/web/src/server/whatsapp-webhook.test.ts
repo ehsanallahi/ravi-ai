@@ -99,6 +99,28 @@ describe("POST /api/webhooks/whatsapp", () => {
     expect((await handleWebhookEvent(post(big, "sha256=00"), d)).status).toBe(413);
   });
 
+  it("verifies the signature over the exact bytes received (Urdu text, invalid UTF-8)", async () => {
+    const { deps: d, enqueue } = deps();
+    const urdu = JSON.stringify(textMessagePayload({ body: "قیمت کیا ہے؟" }));
+    const ok = await handleWebhookEvent(post(urdu, signWebhookBody(urdu, config.appSecret)), d);
+    expect(ok.status).toBe(200);
+
+    // A stray invalid byte: signed over the raw bytes, it must still verify (decoding the body
+    // to text first would replace the byte and break the signature).
+    const bytes = Buffer.concat([
+      Buffer.from(body.slice(0, -1)),
+      Buffer.from([0xff]),
+      Buffer.from("}"),
+    ]);
+    const req = new Request(URL_BASE, {
+      method: "POST",
+      headers: { "X-Hub-Signature-256": signWebhookBody(bytes, config.appSecret) },
+      body: bytes,
+    });
+    expect((await handleWebhookEvent(req, d)).status).toBe(200);
+    expect(enqueue).toHaveBeenCalledTimes(1); // the second body is authentic but not valid JSON
+  });
+
   it("returns 500 when persistence fails so Meta retries", async () => {
     const { deps: d } = deps({
       enqueue: vi.fn(async () => {
